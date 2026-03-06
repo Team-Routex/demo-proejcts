@@ -1,0 +1,57 @@
+[project]
+name = "raft-framework"
+version = "0.1.0"
+description = "Raft Framework — A Django-like Python web framework with hybrid routing, built on ASGI."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [
+    { name = "Raft Contributors" },
+]
+keywords = ["web", "framework", "asgi", "rest", "graphql"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+]
+
+dependencies = [
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0",
+    "python-decouple>=3.8",
+    "python-multipart>=0.0.9",
+    "itsdangerous>=2.1",
+    "strawberry-graphql>=0.230.0",
+    "click>=8.1",
+    "rich>=13.0",
+    "watchfiles>=0.21",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+raft = "raft.cli.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Tell hatchling which directory contains the Python package.
+[tool.hatch.build.targets.wheel]
+packages = ["raft"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
