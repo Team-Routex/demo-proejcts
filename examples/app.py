@@ -21,6 +21,7 @@ from raft.core.views import View
 from raft.core.response import RawResponse
 from raft.core.exceptions import HTTPException, NotFound
 from raft.graphql.integration import GraphQLRouter
+from raft.openapi.router import OpenAPIRouter
 from raft.validation.validator import validate_body
 from raft.middleware.base import CallNext
 from pydantic import BaseModel
@@ -212,18 +213,15 @@ class ItemView(View):
         )
 
 
-# Register CBV
-app.add_route(Route("/items/{id}", ItemView.as_view()))
+# Register CBV — no .as_view() needed; Route detects the class automatically
+app.add_route(Route("/items/{id}", ItemView))
 
 
 # =========================================================================
 # 10. Modular router (Django urlpatterns style)
+#     FBVs are registered via add_routes() — no decorator, no as_view().
 # =========================================================================
 
-users_router = Router(prefix="/users")
-
-
-@users_router.route("/", methods=["GET"])
 async def list_users(request: RaftRequest) -> RawResponse:
     return RaftResponse.ok(
         message="Users listed",
@@ -231,7 +229,6 @@ async def list_users(request: RaftRequest) -> RawResponse:
     )
 
 
-@users_router.route("/{user_id}", methods=["GET"])
 async def get_user(request: RaftRequest) -> RawResponse:
     user_id = request.path_params["user_id"]
     return RaftResponse.ok(
@@ -240,11 +237,32 @@ async def get_user(request: RaftRequest) -> RawResponse:
     )
 
 
+users_router = Router(prefix="/users")
+users_router.add_routes([
+    Route("/", list_users, methods=["GET"]),
+    Route("/{user_id}", get_user, methods=["GET"]),
+])
+
 app.include_router(users_router)
 
 
 # =========================================================================
-# 11. GraphQL endpoint
+# 11. OpenAPI schema + API docs (Swagger UI and ReDoc)
+#    Set RAFT_OPENAPI_DOCS_VISIBILITY=public|private in .env
+#    If private, set RAFT_OPENAPI_DOCS_PASSWORD.
+# =========================================================================
+
+openapi_router = OpenAPIRouter(
+    app,
+    title="Raft Example API",
+    version="0.1.0",
+    description="Example API documentation for the Raft Framework",
+)
+app.include_router(openapi_router.router)
+
+
+# =========================================================================
+# 12. GraphQL endpoint
 # =========================================================================
 
 @strawberry.type
@@ -273,7 +291,7 @@ app.include_router(graphql_router.router)
 
 
 # =========================================================================
-# 12. Error demonstration
+# 13. Error demonstration
 # =========================================================================
 
 @app.route("/error", methods=["GET"])

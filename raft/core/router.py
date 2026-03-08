@@ -38,6 +38,7 @@ from typing import Any, Callable, Awaitable
 
 from raft.core.request import RaftRequest
 from raft.core.response import RawResponse
+from raft.core.views import View
 
 
 # Type alias for a view callable (FBV).
@@ -77,6 +78,8 @@ class Route:
     def __post_init__(self) -> None:
         if self.methods:
             self.methods = [m.upper() for m in self.methods]
+        if isinstance(self.handler, type) and issubclass(self.handler, View):
+            self.handler = self.handler.as_view()
         self._pattern = _compile_path(self.path)
 
 

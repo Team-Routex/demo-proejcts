@@ -34,9 +34,13 @@ Endpoints:
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hmac
 import json
 from typing import Any
 
+from raft.config.settings import settings
 from raft.core.request import RaftRequest
 from raft.core.response import RawResponse
 from raft.core.router import Router
@@ -58,6 +62,9 @@ class OpenAPIRouter:
         redoc_url: URL path for ReDoc (default ``/redoc``).
         openapi_url: URL path for the raw JSON spec (default ``/openapi.json``).
         servers: Optional list of OpenAPI server objects.
+        docs_visibility: ``public`` (default) or ``private``.
+        docs_password: Password for private docs. If omitted, reads
+                       ``RAFT_OPENAPI_DOCS_PASSWORD`` from environment.
     """
 
     def __init__(
@@ -71,6 +78,8 @@ class OpenAPIRouter:
         redoc_url: str = "/redoc",
         openapi_url: str = "/openapi.json",
         servers: list[dict[str, str]] | None = None,
+        docs_visibility: str | None = None,
+        docs_password: str | None = None,
     ) -> None:
         self._source = app_or_router
         self.title = title
@@ -80,6 +89,15 @@ class OpenAPIRouter:
         self.redoc_url = redoc_url
         self.openapi_url = openapi_url
         self.servers = servers
+        configured_visibility = docs_visibility or settings.OPENAPI_DOCS_VISIBILITY
+        normalized_visibility = configured_visibility.strip().lower()
+        self.docs_visibility = (
+            "private" if normalized_visibility == "private" else "public"
+        )
+        configured_password = (
+            settings.OPENAPI_DOCS_PASSWORD if docs_password is None else docs_password
+        )
+        self.docs_password = configured_password.strip()
 
         # Paths to exclude from the generated spec (the doc routes themselves)
         self._exclude_paths: set[str] = {docs_url, redoc_url, openapi_url}
@@ -118,6 +136,38 @@ class OpenAPIRouter:
             exclude_paths=self._exclude_paths,
         )
 
+    def _is_docs_authorized(self, request: RaftRequest) -> bool:
+        """Return True when docs are public or valid password was supplied."""
+        if self.docs_visibility != "private":
+            return True
+        if not self.docs_password:
+            return False
+
+        authorization = request.get_header("authorization", "") or ""
+        parts = authorization.split(" ", 1)
+        if len(parts) != 2 or parts[0].lower() != "basic":
+            return False
+
+        try:
+            decoded = base64.b64decode(parts[1]).decode("utf-8")
+        except (binascii.Error, UnicodeDecodeError):
+            return False
+
+        if ":" not in decoded:
+            return False
+
+        _, provided_password = decoded.split(":", 1)
+        return hmac.compare_digest(provided_password, self.docs_password)
+
+    def _unauthorized_response(self) -> RawResponse:
+        """Return HTTP Basic auth challenge response for private docs."""
+        return RawResponse(
+            body=b"Unauthorized: API docs password required",
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Raft API Docs"'},
+            content_type="text/plain; charset=utf-8",
+        )
+
     def _mount(self) -> None:
         """Register the three doc endpoints on self.router."""
 
@@ -132,6 +182,8 @@ class OpenAPIRouter:
         @this.router.route(openapi_url, methods=["GET"])
         async def openapi_json(request: RaftRequest) -> RawResponse:
             """Serve the raw OpenAPI 3.0.3 JSON specification."""
+            if not this._is_docs_authorized(request):
+                return this._unauthorized_response()
             if this._cached_schema is None:
                 this._cached_schema = this._generate_schema()
             return RawResponse(
@@ -144,6 +196,8 @@ class OpenAPIRouter:
         @this.router.route(docs_url, methods=["GET"])
         async def swagger_ui(request: RaftRequest) -> RawResponse:
             """Serve the Swagger UI interactive documentation."""
+            if not this._is_docs_authorized(request):
+                return this._unauthorized_response()
             html = swagger_ui_html(openapi_url=openapi_url, title=title)
             return RawResponse(
                 body=html.encode("utf-8"),
@@ -155,6 +209,8 @@ class OpenAPIRouter:
         @this.router.route(redoc_url, methods=["GET"])
         async def redoc(request: RaftRequest) -> RawResponse:
             """Serve the ReDoc documentation page."""
+            if not this._is_docs_authorized(request):
+                return this._unauthorized_response()
             html = redoc_html(openapi_url=openapi_url, title=title)
             return RawResponse(
                 body=html.encode("utf-8"),

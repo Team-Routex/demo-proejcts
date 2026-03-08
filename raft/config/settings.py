@@ -66,6 +66,12 @@ class RaftSettings:
         self.HOST: str = config("RAFT_HOST", default="127.0.0.1")
         self.PORT: int = config("RAFT_PORT", default=8000, cast=int)
         self.LOG_LEVEL: str = config("RAFT_LOG_LEVEL", default="info")
+        self.OPENAPI_DOCS_VISIBILITY: str = config(
+            "RAFT_OPENAPI_DOCS_VISIBILITY", default="public"
+        )
+        self.OPENAPI_DOCS_PASSWORD: str = config(
+            "RAFT_OPENAPI_DOCS_PASSWORD", default=""
+        )
         self.BASE_DIR: Path = Path.cwd()
 
     def as_dict(self) -> dict[str, Any]:

@@ -304,6 +304,35 @@ api.add_routes([
 app.include_router(api)
 ```
 
+### Swagger UI / API Docs (Public or Private)
+```python
+from raft.openapi.router import OpenAPIRouter
+
+openapi = OpenAPIRouter(
+    app,
+    title="My API",
+    version="1.0.0",
+    description="Interactive API documentation",
+)
+app.include_router(openapi.router)
+```
+
+Docs endpoints:
+- `GET /openapi.json`
+- `GET /docs` (Swagger UI)
+- `GET /redoc` (ReDoc)
+
+To protect docs with a password in `.env`:
+```env
+RAFT_OPENAPI_DOCS_VISIBILITY=private
+RAFT_OPENAPI_DOCS_PASSWORD=my-docs-password
+```
+
+In `public` mode, no password is required:
+```env
+RAFT_OPENAPI_DOCS_VISIBILITY=public
+```
+
 ---
 
 ## 7. CLI Prototype
@@ -375,6 +404,8 @@ RAFT_PORT=8000
 RAFT_ALLOWED_HOSTS=*
 RAFT_CORS_ALLOWED_ORIGINS=http://localhost:3000,https://myapp.com
 RAFT_LOG_LEVEL=info
+RAFT_OPENAPI_DOCS_VISIBILITY=public
+RAFT_OPENAPI_DOCS_PASSWORD=
 ```
 
 Access in code:
