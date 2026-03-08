@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 	- optional websocket scaffolding with `ws/chat.py`
 	- optional custom middleware starter file generation (`middleware/request_id.py`)
 	- generated project `README.md` now lists enabled/disabled module selections.
+	- generated `bootstrap.structure.json` manifest describing selected features and scaffolded directories.
 
 ### Changed
 
@@ -49,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 	- SQLi middleware now normalizes payloads (decode/comment/whitespace handling) and scans query/path/header + JSON/form inputs.
 	- CSRF middleware now validates same-origin (`Origin`/`Referer` vs `Host`) for mutating methods, supports multiple token sources (`X-CSRF-Token`, `X-XSRF-Token`, cookie/form), and exposes CSRF token in response header/cookie.
 - `raft init` file generation now writes with explicit UTF-8 encoding to avoid Windows encoding failures.
+- `raft init` prompt flow now avoids redundant options:
+	- skips `Use task queue (Celery)?` when built-in scheduler is selected
+	- standardized yes/no prompt defaults for a more consistent interactive experience.
 
 ### Documentation
 
@@ -62,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 	- OpenAPI schema coverage (path params, request body schema, response envelope)
 	- Scheduler repeat semantics and lifecycle integration
 	- Task autodiscovery from `tasks/`
+	- CLI bootstrap structure manifest generation and option-based directory creation
+	- CLI prompt flow behavior (Celery prompt skip when scheduler is enabled)
 	- WebSocket runtime and scaffold behavior
 	- Middleware autodiscovery and detection logging
 	- Security middleware hardening (XSS/SQLi/CSRF)

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+import json
 from pathlib import Path
 
 import click
@@ -47,7 +48,7 @@ def init(project_name: str) -> None:
     )
 
     # Interactive prompts
-    use_openapi = click.confirm("  Enable OpenAPI / Docs?", default=True)
+    use_openapi = click.confirm("  Enable OpenAPI / Docs?", default=False)
     use_graphql = click.confirm("  Use GraphQL?", default=False)
     api_style = "g" if use_graphql else "r"
     use_orm = click.confirm("  Use ORM (RaftSql)?", default=False)
@@ -58,9 +59,13 @@ def init(project_name: str) -> None:
     use_middleware_starter = click.confirm(
         "  Create custom middleware starter file?", default=False
     )
-    use_celery = click.confirm("  Use task queue (Celery)?", default=False)
+    use_celery = False
+    if not use_scheduler:
+        use_celery = click.confirm("  Use task queue (Celery)?", default=False)
+    else:
+        console.print("  [dim]Skipping Celery prompt (scheduler selected).[/dim]")
     use_websocket = click.confirm("  Use WebSocket?", default=False)
-    use_env = click.confirm("  Use .env file?", default=True)
+    use_env = click.confirm("  Use .env file?", default=False)
 
     # Build project
     base = Path.cwd() / project_name
@@ -190,9 +195,10 @@ def _scaffold_project(
         base,
         base / "routes",
         base / "views",
-        base / "middleware",
         base / "schemas",
     ]
+    if use_middleware_starter:
+        dirs.append(base / "middleware")
     if use_orm:
         dirs.append(base / "models")
     if use_scheduler:
@@ -330,6 +336,27 @@ RAFT_LOG_LEVEL=info
         env_enabled=("Yes" if use_env else "No"),
     )
     (base / "README.md").write_text(generated_readme, encoding="utf-8")
+
+    # Bootstrap manifest helps users understand exactly what was generated.
+    bootstrap_manifest = {
+        "project_name": project_name,
+        "api_style": "graphql" if api_style == "g" else "rest",
+        "features": {
+            "openapi": use_openapi,
+            "graphql": api_style == "g",
+            "orm": use_orm,
+            "scheduler": use_scheduler,
+            "middleware_starter": use_middleware_starter,
+            "celery": use_celery,
+            "websocket": use_websocket,
+            "env": use_env,
+        },
+        "directories": sorted(str(d.relative_to(base)).replace("\\", "/") for d in dirs if d != base),
+    }
+    (base / "bootstrap.structure.json").write_text(
+        json.dumps(bootstrap_manifest, indent=2),
+        encoding="utf-8",
+    )
 
     if api_style == "g":
         (base / "graphql_schema" / "query.py").write_text(_GRAPHQL_QUERY_TEMPLATE, encoding="utf-8")
