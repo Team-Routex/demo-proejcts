@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0-alpha.2] - 2026-03-09
+## [0.0.1-alpha.2] - 2026-03-09
 
 ### Added
 
@@ -66,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 	- Security middleware hardening (XSS/SQLi/CSRF)
 	- CLI scaffold toggles for scheduler/websocket/custom middleware starter.
 
-## [0.1.0] - 2026-03-06
+## [0.0.1-alpha.1] - 2026-03-06
 
 ### Added
 
