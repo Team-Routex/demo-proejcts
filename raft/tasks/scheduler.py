@@ -20,6 +20,42 @@ from typing import Any, Awaitable, Callable
 logger = logging.getLogger("raft.scheduler")
 
 TaskCallable = Callable[[], Any]
+TASK_OPTIONS_ATTR = "__raft_task_options__"
+
+
+def periodic_task(
+    *,
+    every: float,
+    repeat: bool = True,
+    name: str | None = None,
+    run_immediately: bool = False,
+) -> Callable[[TaskCallable], TaskCallable]:
+    """Mark a callable for Raft task autodiscovery.
+
+    Example::
+
+        @periodic_task(every=60, repeat=True)
+        async def cleanup_task():
+            ...
+    """
+
+    if every <= 0:
+        raise ValueError("Task interval 'every' must be greater than 0")
+
+    def decorator(func: TaskCallable) -> TaskCallable:
+        setattr(
+            func,
+            TASK_OPTIONS_ATTR,
+            {
+                "every": float(every),
+                "repeat": repeat,
+                "name": name,
+                "run_immediately": run_immediately,
+            },
+        )
+        return func
+
+    return decorator
 
 
 @dataclass(slots=True)

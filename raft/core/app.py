@@ -28,9 +28,11 @@ Running::
 
 from __future__ import annotations
 
+import importlib.util
 import inspect
 import logging
 import traceback
+from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 from pydantic import ValidationError as PydanticValidationError
@@ -47,7 +49,7 @@ from raft.middleware.sqli import sqli_middleware
 from raft.middleware.xss import xss_middleware
 from raft.security.headers import security_headers_middleware
 from raft.session.backend import session_middleware_factory
-from raft.tasks.scheduler import TaskScheduler
+from raft.tasks.scheduler import TASK_OPTIONS_ATTR, TaskScheduler
 from raft.websocket.connection import RaftWebSocket
 from raft.websocket.manager import WebSocketManager
 from raft.websocket.router import WebSocketRoute, WebSocketRouter, WebSocketHandler
@@ -74,6 +76,8 @@ class Raft:
     def __init__(
         self,
         debug: bool | None = None,
+        auto_discover_middleware: bool | None = None,
+        auto_discover_tasks: bool | None = None,
         enable_sessions: bool = True,
         enable_cors: bool = True,
         enable_csrf: bool = False,
@@ -107,6 +111,22 @@ class Raft:
             self._pipeline.add(xss_middleware)
         if enable_sqli:
             self._pipeline.add(sqli_middleware)
+
+        should_discover_tasks = (
+            settings.AUTO_DISCOVER_TASKS
+            if auto_discover_tasks is None
+            else auto_discover_tasks
+        )
+        if should_discover_tasks:
+            self.autodiscover_tasks()
+
+        should_discover = (
+            settings.AUTO_DISCOVER_MIDDLEWARE
+            if auto_discover_middleware is None
+            else auto_discover_middleware
+        )
+        if should_discover:
+            self.autodiscover_middlewares()
 
     # ---- Route registration shortcuts ------------------------------------
 
@@ -167,6 +187,87 @@ class Raft:
         self._chain = None
         self._pipeline.add(middleware)
 
+    def autodiscover_middlewares(
+        self,
+        directory: str | Path | None = None,
+    ) -> int:
+        """Auto-load middleware callables from a project middleware directory.
+
+        Discovery rules:
+            - Scans ``<cwd>/<directory>/*.py`` excluding private modules.
+            - Registers async callables named ``*_middleware``.
+            - Also supports explicit module-level ``MIDDLEWARE`` list/tuple.
+        """
+        middleware_dir_name = directory or settings.MIDDLEWARE_MODULE_DIR
+        base_dir = settings.BASE_DIR if isinstance(settings.BASE_DIR, Path) else Path.cwd()
+        middleware_dir = base_dir / str(middleware_dir_name)
+
+        if not middleware_dir.exists() or not middleware_dir.is_dir():
+            return 0
+
+        loaded = 0
+        for file_path in sorted(middleware_dir.glob("*.py")):
+            if file_path.name.startswith("_"):
+                continue
+
+            module = self._load_module_from_path(file_path, namespace="middleware")
+            if module is None:
+                continue
+
+            for name, middleware in self._extract_middlewares(module):
+                if not self._is_valid_middleware(middleware):
+                    continue
+                self.add_middleware(middleware)
+                loaded += 1
+                logger.info("New middleware detected: %s (%s)", name, file_path.name)
+
+        return loaded
+
+    @staticmethod
+    def _load_module_from_path(file_path: Path, namespace: str = "middleware") -> Any | None:
+        module_name = f"raft_user_{namespace}_{file_path.stem}_{abs(hash(str(file_path)))}"
+        spec = importlib.util.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            return None
+
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            logger.exception("Failed to import middleware module: %s", file_path)
+            return None
+        return module
+
+    @staticmethod
+    def _extract_middlewares(module: Any) -> list[tuple[str, Any]]:
+        explicit = getattr(module, "MIDDLEWARE", None)
+        extracted: list[tuple[str, Any]] = []
+
+        if isinstance(explicit, (list, tuple)):
+            for idx, candidate in enumerate(explicit):
+                name = getattr(candidate, "__name__", f"middleware_{idx}")
+                extracted.append((name, candidate))
+            return extracted
+
+        for name, candidate in inspect.getmembers(module):
+            if not inspect.iscoroutinefunction(candidate):
+                continue
+            if name.endswith("_middleware"):
+                extracted.append((name, candidate))
+
+        return extracted
+
+    @staticmethod
+    def _is_valid_middleware(candidate: Any) -> bool:
+        if not inspect.iscoroutinefunction(candidate):
+            return False
+        try:
+            signature = inspect.signature(candidate)
+        except (TypeError, ValueError):
+            return False
+        # Expected: (request, call_next)
+        return len(signature.parameters) == 2
+
     def on_startup(self, handler: LifecycleHandler) -> LifecycleHandler:
         """Register a startup lifecycle handler."""
         self._startup_handlers.append(handler)
@@ -217,6 +318,91 @@ class Raft:
             name=name,
             run_immediately=run_immediately,
         )
+
+    def autodiscover_tasks(
+        self,
+        directory: str | Path | None = None,
+    ) -> int:
+        """Auto-load periodic tasks from a project tasks directory."""
+        tasks_dir_name = directory or settings.TASKS_MODULE_DIR
+        base_dir = settings.BASE_DIR if isinstance(settings.BASE_DIR, Path) else Path.cwd()
+        tasks_dir = base_dir / str(tasks_dir_name)
+
+        if not tasks_dir.exists() or not tasks_dir.is_dir():
+            return 0
+
+        loaded = 0
+        seen_ids: set[int] = set()
+        for file_path in sorted(tasks_dir.glob("*.py")):
+            if file_path.name.startswith("_"):
+                continue
+
+            module = self._load_module_from_path(file_path, namespace="task")
+            if module is None:
+                continue
+
+            for name, (func, options) in self._extract_tasks(module):
+                if id(func) in seen_ids:
+                    continue
+                seen_ids.add(id(func))
+
+                self.add_task(
+                    func,
+                    every=float(options["every"]),
+                    repeat=bool(options.get("repeat", True)),
+                    name=options.get("name") or name,
+                    run_immediately=bool(options.get("run_immediately", False)),
+                )
+                loaded += 1
+                logger.info("New task detected: %s (%s)", name, file_path.name)
+
+        return loaded
+
+    @staticmethod
+    def _extract_tasks(module: Any) -> list[tuple[str, tuple[Callable[[], Any], dict[str, Any]]]]:
+        extracted: list[tuple[str, tuple[Callable[[], Any], dict[str, Any]]]] = []
+        explicit = getattr(module, "TASKS", None)
+
+        if isinstance(explicit, (list, tuple)):
+            for idx, candidate in enumerate(explicit):
+                normalized = Raft._normalize_task_candidate(candidate, idx)
+                if normalized is not None:
+                    extracted.append(normalized)
+
+        for name, candidate in inspect.getmembers(module):
+            options = getattr(candidate, TASK_OPTIONS_ATTR, None)
+            if callable(candidate) and isinstance(options, dict):
+                extracted.append((name, (candidate, options)))
+
+        return extracted
+
+    @staticmethod
+    def _normalize_task_candidate(
+        candidate: Any,
+        index: int,
+    ) -> tuple[str, tuple[Callable[[], Any], dict[str, Any]]] | None:
+        if callable(candidate):
+            options = getattr(candidate, TASK_OPTIONS_ATTR, None)
+            if isinstance(options, dict):
+                name = getattr(candidate, "__name__", f"task_{index}")
+                return name, (candidate, options)
+            return None
+
+        if isinstance(candidate, dict):
+            func = candidate.get("func")
+            every = candidate.get("every")
+            if not callable(func) or every is None:
+                return None
+            options = {
+                "every": float(every),
+                "repeat": bool(candidate.get("repeat", True)),
+                "name": candidate.get("name"),
+                "run_immediately": bool(candidate.get("run_immediately", False)),
+            }
+            name = options.get("name") or getattr(func, "__name__", f"task_{index}")
+            return str(name), (func, options)
+
+        return None
 
     async def _run_lifecycle_handlers(
         self,

@@ -24,8 +24,10 @@ class CliSchedulerScaffoldTests(unittest.TestCase):
             app_py = (base / "app.py").read_text()
             readme = (base / "README.md").read_text(encoding="utf-8")
             scheduler_py = base / "tasks" / "scheduler.py"
+            periodic_py = base / "tasks" / "periodic.py"
 
             self.assertTrue(scheduler_py.exists())
+            self.assertTrue(periodic_py.exists())
             self.assertIn("from tasks.scheduler import register_scheduled_tasks", app_py)
             self.assertIn("register_scheduled_tasks(app)", app_py)
             self.assertIn("Built-in Task Scheduler: Yes", readme)
@@ -48,8 +50,10 @@ class CliSchedulerScaffoldTests(unittest.TestCase):
             app_py = (base / "app.py").read_text()
             readme = (base / "README.md").read_text(encoding="utf-8")
             scheduler_py = base / "tasks" / "scheduler.py"
+            periodic_py = base / "tasks" / "periodic.py"
 
             self.assertFalse(scheduler_py.exists())
+            self.assertFalse(periodic_py.exists())
             self.assertNotIn("from tasks.scheduler import register_scheduled_tasks", app_py)
             self.assertNotIn("register_scheduled_tasks(app)", app_py)
             self.assertIn("Built-in Task Scheduler: No", readme)

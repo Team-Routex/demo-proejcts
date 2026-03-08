@@ -72,6 +72,18 @@ class RaftSettings:
         self.OPENAPI_DOCS_PASSWORD: str = config(
             "RAFT_OPENAPI_DOCS_PASSWORD", default=""
         )
+        self.AUTO_DISCOVER_MIDDLEWARE: bool = config(
+            "RAFT_AUTO_DISCOVER_MIDDLEWARE", default=True, cast=bool
+        )
+        self.MIDDLEWARE_MODULE_DIR: str = config(
+            "RAFT_MIDDLEWARE_DIR", default="middleware"
+        )
+        self.AUTO_DISCOVER_TASKS: bool = config(
+            "RAFT_AUTO_DISCOVER_TASKS", default=True, cast=bool
+        )
+        self.TASKS_MODULE_DIR: str = config(
+            "RAFT_TASKS_DIR", default="tasks"
+        )
         self.BASE_DIR: Path = Path.cwd()
 
     def as_dict(self) -> dict[str, Any]:

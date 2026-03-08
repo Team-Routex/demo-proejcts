@@ -66,6 +66,12 @@ raft-framework/
 │   │   ├── __init__.py
 │   │   └── integration.py      # GraphQLRouter (Strawberry)
 │   │
+│   ├── openapi/                # OpenAPI schema + Swagger/ReDoc
+│   │   ├── __init__.py
+│   │   ├── router.py
+│   │   ├── schema.py
+│   │   └── ui.py
+│   │
 │   ├── config/                 # Configuration
 │   │   ├── __init__.py
 │   │   └── settings.py         # RaftSettings (python-decouple)
@@ -78,12 +84,24 @@ raft-framework/
 │   │   ├── __init__.py
 │   │   └── main.py             # Click commands (init, runserver, check)
 │   │
+│   ├── tasks/                  # Background scheduler
+│   │   ├── __init__.py
+│   │   └── scheduler.py
+│   │
+│   ├── websocket/              # WebSocket routing + room manager
+│   │   ├── __init__.py
+│   │   ├── connection.py
+│   │   ├── manager.py
+│   │   └── router.py
+│   │
 │   └── utils/                  # Shared utilities (future)
 │       └── __init__.py
 │
 └── examples/                   # Example application
     ├── app.py                  # Full-featured demo app
     └── .env                    # Example env file
+
+tests/                          # Unit tests
 ```
 
 ---
@@ -93,7 +111,8 @@ raft-framework/
 | Folder | Purpose |
 |---|---|
 | `raft/core/` | The heart of the framework: ASGI app, request/response wrappers, routing engine, views, and exceptions. Everything here is imported by user code. |
-| `raft/middleware/` | Middleware pipeline infrastructure and built-in security middleware (CORS, CSRF, XSS, SQLi). Users add custom middleware here too. |
+| `raft/middleware/` | Middleware pipeline infrastructure and built-in security middleware (CORS, CSRF, XSS, SQLi). |
+| `middleware/` (project app folder) | Your custom middleware modules. Raft auto-detects async callables ending in `_middleware` (or a `MIDDLEWARE = [...]` export) at startup. |
 | `raft/security/` | Security-specific utilities — currently security response headers. Future: rate limiting, authentication helpers. |
 | `raft/session/` | Server-side session management with signed cookie transport. Future: Redis/DB backends. |
 | `raft/validation/` | Pydantic-powered request validation. `validate_body()` and `validate_query()` are the primary user-facing functions. |
@@ -291,6 +310,23 @@ async def timing_middleware(request, call_next: CallNext):
 app.add_middleware(timing_middleware)
 ```
 
+Auto-discovery option (clean project structure):
+1. Create a top-level `middleware/` folder in your app project.
+2. Add a module like `middleware/request_id.py`.
+3. Define async middleware functions ending with `_middleware`.
+4. Start your app normally. Raft logs `New middleware detected: ...` and auto-registers them.
+
+Example `middleware/request_id.py`:
+```python
+async def request_id_middleware(request, call_next):
+    import secrets
+
+    request_id = secrets.token_hex(8)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+```
+
 ### Django-Style URL Patterns
 ```python
 from raft import Router, Route
@@ -336,17 +372,33 @@ RAFT_OPENAPI_DOCS_VISIBILITY=public
 ### Task Scheduler (Celery-like Easy Usage)
 ```python
 from raft import Raft
+from raft.tasks import periodic_task
 
 app = Raft()
 
-@app.task(every=30, repeat=True, run_immediately=True)
-async def refresh_cache():
+@periodic_task(every=30, repeat=True, run_immediately=True)
+async def refresh_cache_task():
     print("refreshing cache")
 
 def cleanup_temp_files():
     print("cleanup temp files")
 
 app.add_task(cleanup_temp_files, every=300, name="cleanup")
+```
+
+Recommended structure:
+1. Put periodic jobs in a project-level `tasks/` folder.
+2. Mark jobs with `@periodic_task(...)` for auto-discovery.
+3. Keep plain helper functions there too, and import them in views when needed.
+
+Example view import usage:
+```python
+from tasks.periodic import build_welcome_message
+
+@app.route("/welcome/{name}", methods=["GET"])
+async def welcome(request):
+    name = request.path_params["name"]
+    return RaftResponse.ok(data={"message": build_welcome_message(name)})
 ```
 
 Set `repeat=False` to run only once.
@@ -392,7 +444,8 @@ $ raft init myproject
   Enable OpenAPI / Docs? [Y/n]: y
   API style — (r)est / (g)raphql [r]: r
   Use ORM (RaftSql)? [y/N]: n
-  Use built-in Task Scheduler? [y/N]: n
+    Use built-in Task Scheduler (auto-detect tasks folder)? [y/N]: n
+    Create custom middleware starter file? [y/N]: n
   Use task queue (Celery)? [y/N]: n
   Use WebSocket? [y/N]: n
   Use .env file? [Y/n]: y
