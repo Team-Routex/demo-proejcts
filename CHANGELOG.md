@@ -116,6 +116,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.gitignore` pre-configured for Python, uv, and common editors.
 - `README.md` quick-start guide and `LICENSE` (MIT).
 
-[Unreleased]: https://github.com/raft-framework/raft-framework/compare/v0.2.0-alpha.2...HEAD
-[0.2.0-alpha.2]: https://github.com/raft-framework/raft-framework/compare/v0.1.0...v0.2.0-alpha.2
-[0.1.0]: https://github.com/raft-framework/raft-framework/releases/tag/v0.1.0
+[Unreleased]: https://github.com/raft-framework/raft-framework/compare/v0.0.1-alpha.2...HEAD
+[0.0.1-alpha.2]: https://github.com/raft-framework/raft-framework/compare/v0.0.1-alpha.1...v0.0.1-alpha.2
+[0.0.1-alpha.1]: https://github.com/raft-framework/raft-framework/releases/tag/v0.0.1-alpha.1
