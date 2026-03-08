@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0-alpha.2] - 2026-03-09
+
+### Added
+
+- Class-based view routes can now be registered without explicit `.as_view()` when using `Route(...)`; `Route` auto-detects `View` subclasses and wraps them.
+- OpenAPI docs access control with public/private mode:
+	- `RAFT_OPENAPI_DOCS_VISIBILITY=public|private`
+	- `RAFT_OPENAPI_DOCS_PASSWORD=...`
+	- HTTP Basic auth challenge for `/openapi.json`, `/docs`, and `/redoc` in private mode.
+- In-process periodic task scheduler improvements:
+	- `repeat=True|False` support on `app.task(...)` and `app.add_task(...)`
+	- one-shot task execution via `repeat=False`
+	- startup/shutdown lifecycle integration for automatic scheduler start/stop.
+- Task autodiscovery system:
+	- scans project `tasks/` folder (configurable) and auto-registers periodic jobs
+	- new `@periodic_task(...)` decorator for discovery metadata
+	- startup logs: `New task detected: ...`
+	- settings: `RAFT_AUTO_DISCOVER_TASKS`, `RAFT_TASKS_DIR`.
+- WebSocket subsystem:
+	- `@app.websocket("/path")` route registration
+	- path params for websocket routes
+	- `WebSocketManager` room helpers (`join_room`, `leave_room`, room send, broadcast)
+	- ASGI websocket dispatch in `Raft` with graceful close for not found (`4404`) and handler errors.
+- Custom middleware autodiscovery system:
+	- scans project `middleware/` folder and auto-registers `*_middleware` async callables
+	- optional explicit `MIDDLEWARE = [...]` support
+	- startup logs: `New middleware detected: ...`
+	- settings: `RAFT_AUTO_DISCOVER_MIDDLEWARE`, `RAFT_MIDDLEWARE_DIR`.
+- CLI scaffolding enhancements (`raft init`):
+	- optional scheduler scaffolding with autodiscovery-ready `tasks/periodic.py`
+	- optional websocket scaffolding with `ws/chat.py`
+	- optional custom middleware starter file generation (`middleware/request_id.py`)
+	- generated project `README.md` now lists enabled/disabled module selections.
+
+### Changed
+
+- Hardened security middleware behavior:
+	- XSS middleware now normalizes encoded payloads and scans query/path/header + JSON/form inputs.
+	- SQLi middleware now normalizes payloads (decode/comment/whitespace handling) and scans query/path/header + JSON/form inputs.
+	- CSRF middleware now validates same-origin (`Origin`/`Referer` vs `Host`) for mutating methods, supports multiple token sources (`X-CSRF-Token`, `X-XSRF-Token`, cookie/form), and exposes CSRF token in response header/cookie.
+- `raft init` file generation now writes with explicit UTF-8 encoding to avoid Windows encoding failures.
+
+### Documentation
+
+- Updated README project structure diagram to include current modules (`openapi`, `tasks`, `websocket`, tests).
+- Added task-folder autodiscovery and custom middleware-folder autodiscovery guidance.
+- Added easy websocket usage examples and updated CLI prompt examples.
+
+### Testing
+
+- Added/expanded tests for:
+	- OpenAPI schema coverage (path params, request body schema, response envelope)
+	- Scheduler repeat semantics and lifecycle integration
+	- Task autodiscovery from `tasks/`
+	- WebSocket runtime and scaffold behavior
+	- Middleware autodiscovery and detection logging
+	- Security middleware hardening (XSS/SQLi/CSRF)
+	- CLI scaffold toggles for scheduler/websocket/custom middleware starter.
+
 ## [0.1.0] - 2026-03-06
 
 ### Added
@@ -57,5 +116,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.gitignore` pre-configured for Python, uv, and common editors.
 - `README.md` quick-start guide and `LICENSE` (MIT).
 
-[Unreleased]: https://github.com/raft-framework/raft-framework/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/raft-framework/raft-framework/compare/v0.2.0-alpha.2...HEAD
+[0.2.0-alpha.2]: https://github.com/raft-framework/raft-framework/compare/v0.1.0...v0.2.0-alpha.2
 [0.1.0]: https://github.com/raft-framework/raft-framework/releases/tag/v0.1.0
