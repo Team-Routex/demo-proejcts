@@ -48,11 +48,8 @@ def init(project_name: str) -> None:
 
     # Interactive prompts
     use_openapi = click.confirm("  Enable OpenAPI / Docs?", default=True)
-    api_style = click.prompt(
-        "  API style — (r)est / (g)raphql",
-        type=click.Choice(["r", "g"], case_sensitive=False),
-        default="r",
-    )
+    use_graphql = click.confirm("  Use GraphQL?", default=False)
+    api_style = "g" if use_graphql else "r"
     use_orm = click.confirm("  Use ORM (RaftSql)?", default=False)
     use_scheduler = click.confirm(
         "  Use built-in Task Scheduler (auto-detect tasks folder)?",

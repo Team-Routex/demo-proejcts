@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 	- startup logs: `New middleware detected: ...`
 	- settings: `RAFT_AUTO_DISCOVER_MIDDLEWARE`, `RAFT_MIDDLEWARE_DIR`.
 - CLI scaffolding enhancements (`raft init`):
+	- GraphQL is now explicitly optional via `Use GraphQL? [y/N]`; REST-only scaffold is generated when disabled.
 	- optional scheduler scaffolding with autodiscovery-ready `tasks/periodic.py`
 	- optional websocket scaffolding with `ws/chat.py`
 	- optional custom middleware starter file generation (`middleware/request_id.py`)

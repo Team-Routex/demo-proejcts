@@ -442,7 +442,7 @@ $ raft init myproject
 │ Project: myproject                       │
 ╰─────────────────────────────────────────╯
   Enable OpenAPI / Docs? [Y/n]: y
-  API style — (r)est / (g)raphql [r]: r
+    Use GraphQL? [y/N]: n
   Use ORM (RaftSql)? [y/N]: n
     Use built-in Task Scheduler (auto-detect tasks folder)? [y/N]: n
     Create custom middleware starter file? [y/N]: n
@@ -455,6 +455,8 @@ $ raft init myproject
   uv sync              # install deps
   raft runserver       # start dev server
 ```
+
+If `Use GraphQL?` is `No`, the scaffold stays REST-only (no `graphql_schema/` and no `strawberry-graphql` dependency).
 
 ### `raft runserver`
 ```bash
