@@ -77,6 +77,16 @@ app.add_middleware(request_id_middleware)
 
 
 # =========================================================================
+# 3.1 Background task scheduler (Celery-like periodic jobs)
+# =========================================================================
+
+@app.task(every=60, repeat=True, run_immediately=True)
+async def heartbeat_task() -> None:
+    """Example periodic task that runs every 60 seconds."""
+    print("[scheduler] heartbeat task executed")
+
+
+# =========================================================================
 # 4. Simple REST route (FBV — function-based view)
 # =========================================================================
 

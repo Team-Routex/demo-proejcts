@@ -54,6 +54,7 @@ def init(project_name: str) -> None:
         default="r",
     )
     use_orm = click.confirm("  Use ORM (RaftSql)?", default=False)
+    use_scheduler = click.confirm("  Use built-in Task Scheduler?", default=False)
     use_celery = click.confirm("  Use task queue (Celery)?", default=False)
     use_websocket = click.confirm("  Use WebSocket?", default=False)
     use_env = click.confirm("  Use .env file?", default=True)
@@ -66,6 +67,7 @@ def init(project_name: str) -> None:
         use_openapi=use_openapi,
         api_style=api_style,
         use_orm=use_orm,
+        use_scheduler=use_scheduler,
         use_celery=use_celery,
         use_websocket=use_websocket,
         use_env=use_env,
@@ -173,6 +175,7 @@ def _scaffold_project(
     use_openapi: bool,
     api_style: str,
     use_orm: bool,
+    use_scheduler: bool,
     use_celery: bool,
     use_websocket: bool,
     use_env: bool,
@@ -187,6 +190,8 @@ def _scaffold_project(
     ]
     if use_orm:
         dirs.append(base / "models")
+    if use_scheduler:
+        dirs.append(base / "tasks")
     if use_celery:
         dirs.append(base / "tasks")
     if use_websocket:
@@ -201,7 +206,7 @@ def _scaffold_project(
     for d in dirs:
         init = d / "__init__.py"
         if not init.exists():
-            init.write_text("")
+            init.write_text("", encoding="utf-8")
 
     # pyproject.toml
     deps = [
@@ -232,7 +237,7 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 """
-    (base / "pyproject.toml").write_text(pyproject)
+    (base / "pyproject.toml").write_text(pyproject, encoding="utf-8")
 
     # .env
     if use_env:
@@ -245,26 +250,89 @@ RAFT_ALLOWED_HOSTS=*
 RAFT_CORS_ALLOWED_ORIGINS=*
 RAFT_LOG_LEVEL=info
 """
-        (base / ".env").write_text(env_content)
+        (base / ".env").write_text(env_content, encoding="utf-8")
 
     # app.py — main entry point
     if api_style == "g":
-        app_code = _GRAPHQL_APP_TEMPLATE.format(project_name=project_name)
+        app_code = _GRAPHQL_APP_TEMPLATE.format(
+            project_name=project_name,
+            scheduler_import=(
+                "from tasks.scheduler import register_scheduled_tasks\n"
+                if use_scheduler
+                else ""
+            ),
+            scheduler_setup=(
+                "\n# Register optional periodic jobs\nregister_scheduled_tasks(app)\n"
+                if use_scheduler
+                else ""
+            ),
+            websocket_import=(
+                "from ws.chat import register_websocket_routes\n"
+                if use_websocket
+                else ""
+            ),
+            websocket_setup=(
+                "\n# Register optional websocket routes\nregister_websocket_routes(app)\n"
+                if use_websocket
+                else ""
+            ),
+        )
     else:
-        app_code = _REST_APP_TEMPLATE.format(project_name=project_name)
-    (base / "app.py").write_text(app_code)
+        app_code = _REST_APP_TEMPLATE.format(
+            project_name=project_name,
+            scheduler_import=(
+                "from tasks.scheduler import register_scheduled_tasks\n"
+                if use_scheduler
+                else ""
+            ),
+            scheduler_setup=(
+                "\n# Register optional periodic jobs\nregister_scheduled_tasks(app)\n"
+                if use_scheduler
+                else ""
+            ),
+            websocket_import=(
+                "from ws.chat import register_websocket_routes\n"
+                if use_websocket
+                else ""
+            ),
+            websocket_setup=(
+                "\n# Register optional websocket routes\nregister_websocket_routes(app)\n"
+                if use_websocket
+                else ""
+            ),
+        )
+    (base / "app.py").write_text(app_code, encoding="utf-8")
 
     # routes/home.py
-    (base / "routes" / "home.py").write_text(_HOME_ROUTE_TEMPLATE)
+    (base / "routes" / "home.py").write_text(_HOME_ROUTE_TEMPLATE, encoding="utf-8")
 
     # schemas/user.py
-    (base / "schemas" / "user.py").write_text(_USER_SCHEMA_TEMPLATE)
+    (base / "schemas" / "user.py").write_text(_USER_SCHEMA_TEMPLATE, encoding="utf-8")
 
     # Checker file
-    (base / "raft_check.py").write_text(_CHECKER_TEMPLATE)
+    (base / "raft_check.py").write_text(_CHECKER_TEMPLATE, encoding="utf-8")
+
+    # Generated README
+    generated_readme = _SCAFFOLD_README_TEMPLATE.format(
+        project_name=project_name,
+        api_style=("GraphQL" if api_style == "g" else "REST"),
+        openapi_enabled=("Yes" if use_openapi else "No"),
+        scheduler_enabled=("Yes" if use_scheduler else "No"),
+        orm_enabled=("Yes" if use_orm else "No"),
+        celery_enabled=("Yes" if use_celery else "No"),
+        websocket_enabled=("Yes" if use_websocket else "No"),
+        env_enabled=("Yes" if use_env else "No"),
+    )
+    (base / "README.md").write_text(generated_readme, encoding="utf-8")
 
     if api_style == "g":
-        (base / "graphql_schema" / "query.py").write_text(_GRAPHQL_QUERY_TEMPLATE)
+        (base / "graphql_schema" / "query.py").write_text(_GRAPHQL_QUERY_TEMPLATE, encoding="utf-8")
+
+    if use_scheduler:
+        (base / "tasks" / "scheduler.py").write_text(_TASK_SCHEDULER_TEMPLATE, encoding="utf-8")
+
+    if use_websocket:
+        (base / "ws" / "chat.py").write_text(_WS_CHAT_TEMPLATE, encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -277,11 +345,15 @@ _REST_APP_TEMPLATE = '''"""
 
 from raft import Raft, RaftResponse
 from routes.home import router as home_router
+{scheduler_import}
+{websocket_import}
 
 app = Raft()
 
 # Register route modules
 app.include_router(home_router)
+{scheduler_setup}
+{websocket_setup}
 
 
 @app.route("/", methods=["GET"])
@@ -300,8 +372,12 @@ import strawberry
 from raft import Raft, RaftResponse
 from raft.graphql.integration import GraphQLRouter
 from graphql_schema.query import Query
+{scheduler_import}
+{websocket_import}
 
 app = Raft()
+{scheduler_setup}
+{websocket_setup}
 
 schema = strawberry.Schema(Query)
 graphql = GraphQLRouter(schema, path="/graphql")
@@ -401,4 +477,63 @@ class Query:
     @strawberry.field
     def version(self) -> str:
         return "0.1.0"
+'''
+
+_TASK_SCHEDULER_TEMPLATE = '''"""Optional scheduled jobs for your Raft app."""
+
+
+def register_scheduled_tasks(app) -> None:
+    """Attach periodic jobs only when this module is included at scaffold time."""
+
+    @app.task(every=60, repeat=True, run_immediately=False)
+    async def heartbeat_job() -> None:
+        # Replace with real background work.
+        print("[scheduler] heartbeat job executed")
+'''
+
+_WS_CHAT_TEMPLATE = '''"""Optional websocket routes for your Raft app."""
+
+
+def register_websocket_routes(app) -> None:
+    """Attach websocket handlers only when this module is scaffolded."""
+
+    @app.websocket("/ws/chat/{room}")
+    async def room_chat(ws) -> None:
+        room = ws.path_params.get("room", "general")
+        await ws.join_room(room)
+        await ws.send_json({"event": "joined", "room": room})
+
+        while True:
+            try:
+                text = await ws.receive_text()
+            except ConnectionError:
+                break
+            await ws.send_room(room, text)
+'''
+
+_SCAFFOLD_README_TEMPLATE = '''# {project_name}
+
+Generated by `raft init`.
+
+## Enabled Modules
+
+- API Style: {api_style}
+- OpenAPI / Docs: {openapi_enabled}
+- Built-in Task Scheduler: {scheduler_enabled}
+- ORM (RaftSql): {orm_enabled}
+- Task Queue (Celery): {celery_enabled}
+- WebSocket: {websocket_enabled}
+- .env File: {env_enabled}
+
+## Quick Start
+
+```bash
+uv sync
+raft runserver
+```
+
+## App Entry
+
+- Main app file: `app.py`
+- Health route example: `GET /home/health`
 '''

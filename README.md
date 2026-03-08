@@ -14,7 +14,7 @@ Raft Framework aims to be a **beginner-friendly, production-aware** Python web f
 - **Modern Python** — async/await everywhere, type hints, Pydantic v2
 - **ASGI-native** — built for uvicorn, supports async middleware pipelines
 - **Hybrid routing** — use decorators (Flask-style) or URL lists (Django-style), or mix both
-- **Batteries included** — sessions, security headers, CORS, CSRF, validation, GraphQL
+- **Batteries included** — sessions, security headers, CORS, CSRF, validation, GraphQL, task scheduling, WebSocket routes
 - **CLI scaffolding** — `raft init` creates projects interactively
 - **UV-compatible** — works seamlessly with the `uv` package manager
 
@@ -333,6 +333,50 @@ In `public` mode, no password is required:
 RAFT_OPENAPI_DOCS_VISIBILITY=public
 ```
 
+### Task Scheduler (Celery-like Easy Usage)
+```python
+from raft import Raft
+
+app = Raft()
+
+@app.task(every=30, repeat=True, run_immediately=True)
+async def refresh_cache():
+    print("refreshing cache")
+
+def cleanup_temp_files():
+    print("cleanup temp files")
+
+app.add_task(cleanup_temp_files, every=300, name="cleanup")
+```
+
+Set `repeat=False` to run only once.
+
+The scheduler starts automatically on ASGI lifespan startup and stops on shutdown.
+
+Important: this scheduler is in-process. If you run multiple workers, each worker runs the tasks.
+
+### WebSocket (Easy Room Chat Style)
+```python
+from raft import Raft
+
+app = Raft()
+
+@app.websocket("/ws/chat/{room}")
+async def room_chat(ws):
+    room = ws.path_params["room"]
+    await ws.join_room(room)
+    await ws.send_json({"event": "joined", "room": room})
+
+    while True:
+        try:
+            text = await ws.receive_text()
+        except ConnectionError:
+            break
+        await ws.send_room(room, text)
+```
+
+This is intentionally simpler than Django Channels: no separate consumer classes or channel layers required for basic usage.
+
 ---
 
 ## 7. CLI Prototype
@@ -348,6 +392,7 @@ $ raft init myproject
   Enable OpenAPI / Docs? [Y/n]: y
   API style — (r)est / (g)raphql [r]: r
   Use ORM (RaftSql)? [y/N]: n
+  Use built-in Task Scheduler? [y/N]: n
   Use task queue (Celery)? [y/N]: n
   Use WebSocket? [y/N]: n
   Use .env file? [Y/n]: y

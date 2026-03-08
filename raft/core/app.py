@@ -28,6 +28,7 @@ Running::
 
 from __future__ import annotations
 
+import inspect
 import logging
 import traceback
 from typing import Any, Callable, Awaitable
@@ -46,8 +47,14 @@ from raft.middleware.sqli import sqli_middleware
 from raft.middleware.xss import xss_middleware
 from raft.security.headers import security_headers_middleware
 from raft.session.backend import session_middleware_factory
+from raft.tasks.scheduler import TaskScheduler
+from raft.websocket.connection import RaftWebSocket
+from raft.websocket.manager import WebSocketManager
+from raft.websocket.router import WebSocketRoute, WebSocketRouter, WebSocketHandler
 
 logger = logging.getLogger("raft")
+
+LifecycleHandler = Callable[[], Awaitable[None] | None]
 
 
 class Raft:
@@ -76,6 +83,11 @@ class Raft:
     ) -> None:
         self.debug: bool = debug if debug is not None else settings.DEBUG
         self.router: Router = Router()
+        self.websocket_router: WebSocketRouter = WebSocketRouter()
+        self.websocket_manager: WebSocketManager = WebSocketManager()
+        self.scheduler: TaskScheduler = TaskScheduler()
+        self._startup_handlers: list[LifecycleHandler] = [self.scheduler.start]
+        self._shutdown_handlers: list[LifecycleHandler] = [self.scheduler.stop]
 
         # Middleware pipeline — order matters.
         self._pipeline: MiddlewarePipeline = MiddlewarePipeline()
@@ -135,12 +147,86 @@ class Raft:
         self._chain = None
         self.router.include_router(router)
 
+    def websocket(
+        self,
+        path: str,
+        *,
+        name: str | None = None,
+    ) -> Callable[[WebSocketHandler], WebSocketHandler]:
+        """Decorator shortcut for ``self.websocket_router.websocket(...)``."""
+        return self.websocket_router.websocket(path, name=name)
+
+    def add_websocket(self, route: WebSocketRoute) -> None:
+        """Register a websocket route object directly."""
+        self.websocket_router.add_route(route)
+
     # ---- Middleware -------------------------------------------------------
 
     def add_middleware(self, middleware: MiddlewareFunc) -> None:
         """Add a custom middleware to the pipeline."""
         self._chain = None
         self._pipeline.add(middleware)
+
+    def on_startup(self, handler: LifecycleHandler) -> LifecycleHandler:
+        """Register a startup lifecycle handler."""
+        self._startup_handlers.append(handler)
+        return handler
+
+    def on_shutdown(self, handler: LifecycleHandler) -> LifecycleHandler:
+        """Register a shutdown lifecycle handler."""
+        self._shutdown_handlers.append(handler)
+        return handler
+
+    def task(
+        self,
+        *,
+        every: float,
+        repeat: bool = True,
+        name: str | None = None,
+        run_immediately: bool = False,
+    ) -> Callable[[Callable[[], Any]], Callable[[], Any]]:
+        """Decorator for periodic background tasks.
+
+        Usage::
+
+            @app.task(every=60, repeat=True, run_immediately=True)
+            async def refresh_cache():
+                ...
+        """
+        return self.scheduler.task(
+            every=every,
+            repeat=repeat,
+            name=name,
+            run_immediately=run_immediately,
+        )
+
+    def add_task(
+        self,
+        func: Callable[[], Any],
+        *,
+        every: float,
+        repeat: bool = True,
+        name: str | None = None,
+        run_immediately: bool = False,
+    ) -> Callable[[], Any]:
+        """Programmatically register a periodic background task."""
+        return self.scheduler.add_task(
+            func,
+            every=every,
+            repeat=repeat,
+            name=name,
+            run_immediately=run_immediately,
+        )
+
+    async def _run_lifecycle_handlers(
+        self,
+        handlers: list[LifecycleHandler],
+    ) -> None:
+        """Execute lifecycle handlers in registration order."""
+        for handler in handlers:
+            result = handler()
+            if inspect.isawaitable(result):
+                await result
 
     # ---- ASGI interface ---------------------------------------------------
 
@@ -149,14 +235,35 @@ class Raft:
     ) -> None:
         """ASGI entry point."""
         if scope["type"] == "lifespan":
-            # Accept lifespan events but do nothing for now.
             while True:
                 message = await receive()
                 if message["type"] == "lifespan.startup":
-                    await send({"type": "lifespan.startup.complete"})
+                    try:
+                        await self._run_lifecycle_handlers(self._startup_handlers)
+                        await send({"type": "lifespan.startup.complete"})
+                    except Exception as exc:
+                        await send(
+                            {
+                                "type": "lifespan.startup.failed",
+                                "message": str(exc),
+                            }
+                        )
                 elif message["type"] == "lifespan.shutdown":
-                    await send({"type": "lifespan.shutdown.complete"})
+                    try:
+                        await self._run_lifecycle_handlers(self._shutdown_handlers)
+                        await send({"type": "lifespan.shutdown.complete"})
+                    except Exception as exc:
+                        await send(
+                            {
+                                "type": "lifespan.shutdown.failed",
+                                "message": str(exc),
+                            }
+                        )
                     return
+            return
+
+        if scope["type"] == "websocket":
+            await self._dispatch_websocket(scope, receive, send)
             return
 
         if scope["type"] != "http":
@@ -213,3 +320,42 @@ class Raft:
         route, path_params = result
         request.path_params = path_params
         return await route.handler(request)
+
+    async def _dispatch_websocket(
+        self,
+        scope: dict[str, Any],
+        receive: Any,
+        send: Any,
+    ) -> None:
+        """Resolve and dispatch websocket handlers with a simple room manager."""
+        websocket = RaftWebSocket(
+            scope=scope,
+            receive=receive,
+            send=send,
+            manager=self.websocket_manager,
+        )
+
+        resolved = self.websocket_router.resolve(websocket.path)
+        if resolved is None:
+            await websocket.close(code=4404, reason="WebSocket route not found")
+            return
+
+        route, path_params = resolved
+        websocket.path_params = path_params
+        self.websocket_manager.connect(websocket)
+
+        try:
+            # Easy default: handlers can send/receive immediately.
+            await websocket.accept()
+            await route.handler(websocket)
+        except ConnectionError:
+            # Client disconnected while handler was waiting for messages.
+            pass
+        except Exception as exc:
+            logger.exception("Unhandled exception in websocket handler")
+            reason = str(exc)[:120] if self.debug else "Internal Server Error"
+            await websocket.close(code=1011, reason=reason)
+        finally:
+            self.websocket_manager.disconnect(websocket)
+            if not websocket.is_closed:
+                await websocket.close()

@@ -34,6 +34,9 @@ from raft.core.router import Router, Route
 from raft.core.views import View
 from raft.core.exceptions import HTTPException, ValidationError as RaftValidationError
 from raft.openapi.router import OpenAPIRouter
+from raft.websocket.connection import RaftWebSocket
+from raft.websocket.manager import WebSocketManager
+from raft.websocket.router import WebSocketRoute
 
 __version__ = "0.1.0"
 __all__ = [
@@ -46,4 +49,7 @@ __all__ = [
     "HTTPException",
     "RaftValidationError",
     "OpenAPIRouter",
+    "RaftWebSocket",
+    "WebSocketRoute",
+    "WebSocketManager",
 ]
