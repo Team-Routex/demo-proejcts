@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,7 +16,6 @@ class CliBootstrapStructureTests(unittest.TestCase):
                 api_style="r",
                 use_orm=False,
                 use_scheduler=False,
-                use_celery=False,
                 use_websocket=False,
                 use_env=True,
                 use_middleware_starter=False,
@@ -25,16 +23,12 @@ class CliBootstrapStructureTests(unittest.TestCase):
 
             self.assertTrue((base / "routes").exists())
             self.assertTrue((base / "schemas").exists())
+            self.assertTrue((base / "serializers").exists())
             self.assertFalse((base / "tasks").exists())
             self.assertFalse((base / "ws").exists())
             self.assertFalse((base / "graphql_schema").exists())
             self.assertFalse((base / "middleware").exists())
-
-            manifest = json.loads((base / "bootstrap.structure.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["api_style"], "rest")
-            self.assertFalse(manifest["features"]["scheduler"])
-            self.assertFalse(manifest["features"]["websocket"])
-            self.assertFalse(manifest["features"]["middleware_starter"])
+            self.assertFalse((base / "bootstrap.structure.json").exists())
 
     def test_full_bootstrap_includes_selected_feature_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -46,7 +40,6 @@ class CliBootstrapStructureTests(unittest.TestCase):
                 api_style="g",
                 use_orm=True,
                 use_scheduler=True,
-                use_celery=True,
                 use_websocket=True,
                 use_env=True,
                 use_middleware_starter=True,
@@ -57,13 +50,7 @@ class CliBootstrapStructureTests(unittest.TestCase):
             self.assertTrue((base / "graphql_schema").exists())
             self.assertTrue((base / "models").exists())
             self.assertTrue((base / "middleware").exists())
-
-            manifest = json.loads((base / "bootstrap.structure.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["api_style"], "graphql")
-            self.assertTrue(manifest["features"]["scheduler"])
-            self.assertTrue(manifest["features"]["celery"])
-            self.assertTrue(manifest["features"]["websocket"])
-            self.assertTrue(manifest["features"]["middleware_starter"])
+            self.assertFalse((base / "bootstrap.structure.json").exists())
 
 
 if __name__ == "__main__":

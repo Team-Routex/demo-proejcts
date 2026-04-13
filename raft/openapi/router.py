@@ -47,6 +47,18 @@ from raft.core.router import Router
 from raft.openapi.schema import build_openapi_schema
 from raft.openapi.ui import redoc_html, swagger_ui_html
 
+# Relaxed CSP for HTML doc pages only. Default ``default-src 'self'`` from
+# ``security_headers_middleware`` blocks CDN scripts + inline bootstrappers,
+# which leaves Swagger UI / ReDoc blank.
+_DOCS_PAGE_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+    "connect-src 'self'; "
+    "img-src 'self' data: blob: https:; "
+    "font-src 'self' https://unpkg.com data:;"
+)
+
 
 class OpenAPIRouter:
     """Generates and serves OpenAPI docs for a Raft application.
@@ -203,6 +215,7 @@ class OpenAPIRouter:
                 body=html.encode("utf-8"),
                 status_code=200,
                 content_type="text/html; charset=utf-8",
+                headers={"Content-Security-Policy": _DOCS_PAGE_CSP},
             )
 
         # --- /redoc -------------------------------------------------------
@@ -216,4 +229,5 @@ class OpenAPIRouter:
                 body=html.encode("utf-8"),
                 status_code=200,
                 content_type="text/html; charset=utf-8",
+                headers={"Content-Security-Policy": _DOCS_PAGE_CSP},
             )

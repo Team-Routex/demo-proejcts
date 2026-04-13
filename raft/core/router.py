@@ -96,6 +96,26 @@ def _compile_path(path: str) -> re.Pattern[str]:
     return re.compile(f"^{regex}$")
 
 
+def _merge_serializer_openapi_metadata(
+    *,
+    request_body: type | None,
+    request_serializer: type | None,
+    responses: dict[int, Any] | None,
+    response_serializer: type | None,
+    methods: list[str] | None,
+) -> tuple[type | None, dict[int, Any] | None]:
+    """Resolve ``request_body`` / ``responses`` using ``request_serializer`` / ``response_serializer`` aliases."""
+    body: type | None = request_body if request_body is not None else request_serializer
+    if responses is not None:
+        return body, responses
+    if response_serializer is None:
+        return body, responses
+    mlist = methods or ["GET"]
+    primary = (mlist[0] if mlist else "GET").upper()
+    code = 201 if primary == "POST" else 200
+    return body, {code: response_serializer}
+
+
 class Router:
     """Collects routes and resolves incoming request paths.
 
@@ -118,8 +138,14 @@ class Router:
         summary: str | None = None,
         request_body: type | None = None,
         responses: dict[int, Any] | None = None,
+        request_serializer: type | None = None,
+        response_serializer: type | None = None,
     ) -> Callable[[ViewCallable], ViewCallable]:
         """Decorator to register a function-based view.
+
+        ``request_serializer`` / ``response_serializer`` are aliases for OpenAPI and
+        validation: they map to ``request_body`` and default ``responses`` (200 or
+        201 for POST) when you omit explicit ``responses``.
 
         Usage::
 
@@ -130,6 +156,13 @@ class Router:
 
         def decorator(func: ViewCallable) -> ViewCallable:
             full_path = self.prefix + path
+            rb, resp = _merge_serializer_openapi_metadata(
+                request_body=request_body,
+                request_serializer=request_serializer,
+                responses=responses,
+                response_serializer=response_serializer,
+                methods=methods,
+            )
             r = Route(
                 path=full_path,
                 handler=func,
@@ -137,8 +170,8 @@ class Router:
                 name=name,
                 tags=tags,
                 summary=summary,
-                request_body=request_body,
-                responses=responses,
+                request_body=rb,
+                responses=resp,
             )
             self._routes.append(r)
             return func

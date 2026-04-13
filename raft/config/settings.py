@@ -34,6 +34,10 @@ class RaftSettings:
         HOST: Server bind host.
         PORT: Server bind port.
         LOG_LEVEL: Logging level string.
+        AUTO_DISCOVER_ROUTES: Scan ``routes/`` (or ``RAFT_ROUTES_DIR``) for ``router``.
+        ROUTES_MODULE_DIR: Subdirectory under ``BASE_DIR`` holding route modules.
+        AUTO_DISCOVER_SERIALIZERS: Load ``Serializer`` subclasses from ``serializers/``.
+        SERIALIZERS_MODULE_DIR: Subdirectory for serializer modules.
     """
 
     def __init__(self) -> None:
@@ -83,6 +87,18 @@ class RaftSettings:
         )
         self.TASKS_MODULE_DIR: str = config(
             "RAFT_TASKS_DIR", default="tasks"
+        )
+        self.AUTO_DISCOVER_ROUTES: bool = config(
+            "RAFT_AUTO_DISCOVER_ROUTES", default=True, cast=bool
+        )
+        self.ROUTES_MODULE_DIR: str = config(
+            "RAFT_ROUTES_DIR", default="routes"
+        )
+        self.AUTO_DISCOVER_SERIALIZERS: bool = config(
+            "RAFT_AUTO_DISCOVER_SERIALIZERS", default=True, cast=bool
+        )
+        self.SERIALIZERS_MODULE_DIR: str = config(
+            "RAFT_SERIALIZERS_DIR", default="serializers"
         )
         self.BASE_DIR: Path = Path.cwd()
 

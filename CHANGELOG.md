@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Framework = `raft/` package, `raft` CLI, and `raft init` scaffold output (not the `examples/` tree).
+
+### Added
+
+- **Route autodiscovery (`raft.core.app.Raft`):** loads routers from `routes/*.py` under the project root (skips `__init__.py` and `_*.py`). Each module may export `router` or `ROUTERS`. Settings: `RAFT_AUTO_DISCOVER_ROUTES`, `RAFT_ROUTES_DIR`. Opt out with `Raft(auto_discover_routes=False)`.
+- **`raft check` (CLI):** verifies the default ASGI entry (`app` or `main`) imports and defines an `app` attribute.
+- **`raft.serialization`:** `Serializer` subclass of Pydantic `BaseModel` for shared request/response validation and OpenAPI: `from_payload` / overridden `model_validate` (runs `validate_<field>(self, value)` then `validate(self, attrs)`; optional `validation_error({field: message})`); inbound strip of `read_only` fields; `Serializer(data=…)` / `Serializer(instance=…)`; `.data`, `.validated_data`, `.is_valid()`; instance `to_representation(self, instance)`; class helpers `serialize` / `serialize_many`. Pydantic `field_validator` / `model_validator` remain supported. `validation_error` is exported from `raft` and `raft.serialization`.
+- **Field helpers (`raft.serialization.fields`):** `IntegerField`, `CharField`, `EmailField`, `BooleanField` with optional `read_only` / `write_only` (JSON Schema `readOnly` / `writeOnly`, internal `raft_*` markers stripped in published OpenAPI).
+- **Serializer autodiscovery:** `Raft()` registers `Serializer` subclasses from `serializers/*.py` (`RAFT_AUTO_DISCOVER_SERIALIZERS`, `RAFT_SERIALIZERS_DIR`); `register_serializer` / `registered_serializers` merge into OpenAPI components via `raft.openapi.schema`.
+- **Router OpenAPI kwargs (`raft.core.router`):** `request_serializer` / `response_serializer` aliases for `request_body` / `responses` when declaring routes.
+
+### Changed
+
+- **`raft.core.response.RaftResponse` envelope:** `errors` appears only when `status` is false and at least one non-empty error string exists (after trimming); never on success, including `RaftResponse.custom`. OpenAPI built-in `RaftResponse` schema marks `errors` optional and `required: ["status", "message"]`.
+- **`raft.openapi.schema`:** Pydantic `model_json_schema()` output is sanitized before merge into `components/schemas` so internal `raft_*` keys do not appear in Swagger.
+- **`raft.security.headers`:** documented that doc pages may set their own `Content-Security-Policy` first; middleware uses `setdefault` and does not overwrite it.
+- **`raft init` / scaffold:** no longer writes `bootstrap.structure.json`; Celery prompt removed and `celery` omitted from generated `pyproject.toml`; generated REST `app.py` relies on route autodiscovery instead of manually `include_router` for `routes/home.py`; generated README adjustments.
+
+### Fixed
+
+- **`raft.openapi.router.OpenAPIRouter`:** `/docs` and `/redoc` were blank in the browser because `security_headers_middleware`’s `default-src 'self'` CSP blocked CDN and inline Swagger/ReDoc bootstrappers. Doc HTML responses now attach a relaxed CSP for those routes only.
+- **`raft.cli` dev server (Windows + reload):** uvicorn workers could fail to import `app`; runners add the project root to `PYTHONPATH` and pass `app_dir` / `reload_dirs` to uvicorn.
+
+### Breaking
+
+- **Serialization class API:** class-level `Serializer.to_representation` / `to_representation_many` were replaced by `Serializer.serialize` / `serialize_many` (Python cannot expose both a classmethod and instance method under the same name as before). Update call sites accordingly.
+
 ## [0.0.1-alpha.2] - 2026-03-09
 
 ### Added

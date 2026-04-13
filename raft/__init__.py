@@ -34,6 +34,7 @@ from raft.core.router import Router, Route
 from raft.core.views import View
 from raft.core.exceptions import HTTPException, ValidationError as RaftValidationError
 from raft.openapi.router import OpenAPIRouter
+from raft.serialization import Serializer, validation_error
 from raft.websocket.connection import RaftWebSocket
 from raft.websocket.manager import WebSocketManager
 from raft.websocket.router import WebSocketRoute
@@ -49,6 +50,8 @@ __all__ = [
     "HTTPException",
     "RaftValidationError",
     "OpenAPIRouter",
+    "Serializer",
+    "validation_error",
     "RaftWebSocket",
     "WebSocketRoute",
     "WebSocketManager",

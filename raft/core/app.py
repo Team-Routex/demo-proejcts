@@ -71,6 +71,10 @@ class Raft:
         enable_security_headers: Attach security-headers middleware (default True).
         enable_xss: Attach XSS scanning middleware (default True).
         enable_sqli: Attach SQLi scanning middleware (default True).
+        auto_discover_routes: Load ``router`` from each module under the routes
+            directory (default from ``RAFT_AUTO_DISCOVER_ROUTES``).
+        auto_discover_serializers: Load ``Serializer`` subclasses from the
+            serializers package (default from ``RAFT_AUTO_DISCOVER_SERIALIZERS``).
     """
 
     def __init__(
@@ -84,6 +88,8 @@ class Raft:
         enable_security_headers: bool = True,
         enable_xss: bool = True,
         enable_sqli: bool = True,
+        auto_discover_routes: bool | None = None,
+        auto_discover_serializers: bool | None = None,
     ) -> None:
         self.debug: bool = debug if debug is not None else settings.DEBUG
         self.router: Router = Router()
@@ -128,6 +134,22 @@ class Raft:
         if should_discover:
             self.autodiscover_middlewares()
 
+        should_discover_routes = (
+            settings.AUTO_DISCOVER_ROUTES
+            if auto_discover_routes is None
+            else auto_discover_routes
+        )
+        if should_discover_routes:
+            self.autodiscover_routes()
+
+        should_discover_serializers = (
+            settings.AUTO_DISCOVER_SERIALIZERS
+            if auto_discover_serializers is None
+            else auto_discover_serializers
+        )
+        if should_discover_serializers:
+            self.autodiscover_serializers()
+
     # ---- Route registration shortcuts ------------------------------------
 
     def route(
@@ -139,6 +161,8 @@ class Raft:
         summary: str | None = None,
         request_body: type | None = None,
         responses: dict[int, Any] | None = None,
+        request_serializer: type | None = None,
+        response_serializer: type | None = None,
     ) -> Callable[[ViewCallable], ViewCallable]:
         """Decorator shortcut for ``self.router.route(...)``."""
         self._chain = None  # invalidate cached chain
@@ -150,6 +174,8 @@ class Raft:
             summary=summary,
             request_body=request_body,
             responses=responses,
+            request_serializer=request_serializer,
+            response_serializer=response_serializer,
         )
 
     def add_route(self, route: Route) -> None:
@@ -166,6 +192,109 @@ class Raft:
         """Merge an external router's routes."""
         self._chain = None
         self.router.include_router(router)
+
+    def autodiscover_routes(
+        self,
+        directory: str | Path | None = None,
+    ) -> int:
+        """Load ``Router`` instances from a project ``routes`` directory.
+
+        Discovery rules:
+            - Scans ``<cwd>/<directory>/*.py`` excluding ``__init__.py`` and
+              private modules (``_*``).
+            - If a module defines ``ROUTERS`` (list/tuple of ``Router``), each
+              is merged.
+            - Otherwise, if the module defines ``router`` as a ``Router``,
+              it is merged.
+
+        Environment:
+            ``RAFT_AUTO_DISCOVER_ROUTES``, ``RAFT_ROUTES_DIR`` (see settings).
+        """
+        routes_dir_name = directory or settings.ROUTES_MODULE_DIR
+        base_dir = settings.BASE_DIR if isinstance(settings.BASE_DIR, Path) else Path.cwd()
+        routes_dir = base_dir / str(routes_dir_name)
+
+        if not routes_dir.exists() or not routes_dir.is_dir():
+            return 0
+
+        loaded = 0
+        for file_path in sorted(routes_dir.glob("*.py")):
+            if file_path.name.startswith("_") or file_path.name == "__init__.py":
+                continue
+
+            module = self._load_module_from_path(
+                file_path, namespace="routes", log_label="routes"
+            )
+            if module is None:
+                continue
+
+            for subrouter in self._extract_routers(module):
+                self.include_router(subrouter)
+                loaded += 1
+                logger.info("New router detected: %s (%s)", subrouter.prefix or "/", file_path.name)
+
+        return loaded
+
+    @staticmethod
+    def _extract_routers(module: Any) -> list[Router]:
+        explicit = getattr(module, "ROUTERS", None)
+        if isinstance(explicit, (list, tuple)):
+            routers = [r for r in explicit if isinstance(r, Router)]
+            if routers:
+                return routers
+
+        router = getattr(module, "router", None)
+        if isinstance(router, Router):
+            return [router]
+
+        return []
+
+    def autodiscover_serializers(
+        self,
+        directory: str | Path | None = None,
+    ) -> int:
+        """Register ``Serializer`` subclasses from a project ``serializers`` folder.
+
+        Scans ``*.py`` (skips ``__init__.py`` and ``_*``). Each defined subclass
+        of :class:`raft.serialization.base.Serializer` is registered for OpenAPI
+        components and introspection.
+
+        Environment: ``RAFT_AUTO_DISCOVER_SERIALIZERS``, ``RAFT_SERIALIZERS_DIR``.
+        """
+        from raft.serialization.base import Serializer
+        from raft.serialization.registry import register_serializer
+
+        serializers_dir_name = directory or settings.SERIALIZERS_MODULE_DIR
+        base_dir = settings.BASE_DIR if isinstance(settings.BASE_DIR, Path) else Path.cwd()
+        ser_dir = base_dir / str(serializers_dir_name)
+
+        if not ser_dir.exists() or not ser_dir.is_dir():
+            return 0
+
+        loaded = 0
+        for file_path in sorted(ser_dir.glob("*.py")):
+            if file_path.name.startswith("_") or file_path.name == "__init__.py":
+                continue
+
+            module = self._load_module_from_path(
+                file_path, namespace="serializers", log_label="serializers"
+            )
+            if module is None:
+                continue
+
+            mod_name = module.__name__
+            for _name, obj in inspect.getmembers(module):
+                if not isinstance(obj, type):
+                    continue
+                if getattr(obj, "__module__", None) != mod_name:
+                    continue
+                if not issubclass(obj, Serializer) or obj is Serializer:
+                    continue
+                register_serializer(obj)
+                loaded += 1
+                logger.info("Serializer registered: %s (%s)", obj.__name__, file_path.name)
+
+        return loaded
 
     def websocket(
         self,
@@ -210,7 +339,9 @@ class Raft:
             if file_path.name.startswith("_"):
                 continue
 
-            module = self._load_module_from_path(file_path, namespace="middleware")
+            module = self._load_module_from_path(
+                file_path, namespace="middleware", log_label="middleware"
+            )
             if module is None:
                 continue
 
@@ -224,7 +355,12 @@ class Raft:
         return loaded
 
     @staticmethod
-    def _load_module_from_path(file_path: Path, namespace: str = "middleware") -> Any | None:
+    def _load_module_from_path(
+        file_path: Path,
+        namespace: str = "middleware",
+        *,
+        log_label: str = "middleware",
+    ) -> Any | None:
         module_name = f"raft_user_{namespace}_{file_path.stem}_{abs(hash(str(file_path)))}"
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
@@ -234,7 +370,7 @@ class Raft:
         try:
             spec.loader.exec_module(module)
         except Exception:
-            logger.exception("Failed to import middleware module: %s", file_path)
+            logger.exception("Failed to import %s module: %s", log_label, file_path)
             return None
         return module
 
@@ -337,7 +473,9 @@ class Raft:
             if file_path.name.startswith("_"):
                 continue
 
-            module = self._load_module_from_path(file_path, namespace="task")
+            module = self._load_module_from_path(
+                file_path, namespace="task", log_label="tasks"
+            )
             if module is None:
                 continue
 

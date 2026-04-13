@@ -446,7 +446,6 @@ $ raft init myproject
   Use ORM (RaftSql)? [y/N]: n
     Use built-in Task Scheduler (auto-detect tasks folder)? [y/N]: y
     Create custom middleware starter file? [y/N]: y
-    Skipping Celery prompt (scheduler selected).
   Use WebSocket? [y/N]: n
     Use .env file? [y/N]: n
 
@@ -457,7 +456,6 @@ $ raft init myproject
 ```
 
 If `Use GraphQL?` is `No`, the scaffold stays REST-only (no `graphql_schema/` and no `strawberry-graphql` dependency).
-Scaffold output also includes `bootstrap.structure.json` so users can see exactly which optional modules were generated.
 
 ### `raft runserver`
 ```bash

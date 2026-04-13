@@ -9,9 +9,12 @@ Every Raft response follows a unified envelope::
     {
         "status": true,
         "message": "...",
-        "data": {...},
-        "errors": [...]
+        "data": {...}
     }
+
+The ``errors`` key is **only** included on **failed** responses (``status: false``)
+when there is at least one non-empty error string. It is never sent on success
+(``status: true``), even if a caller mistakenly passes error strings.
 
 ``RaftResponse`` provides class methods for common HTTP status codes so
 view code stays concise:
@@ -125,10 +128,10 @@ class RaftResponse:
             "message": message,
             "data": data,
         }
-        if errors:
-            payload["errors"] = errors
-        else:
-            payload["errors"] = []
+        if not status:
+            filtered = [str(e).strip() for e in (errors or []) if str(e).strip()]
+            if filtered:
+                payload["errors"] = filtered
 
         body = json.dumps(payload, default=str).encode("utf-8")
         return RawResponse(
@@ -148,7 +151,9 @@ class RaftResponse:
         headers: dict[str, str] | None = None,
     ) -> RawResponse:
         """200 OK."""
-        return cls._build(status=True, message=message, data=data, http_status=200, headers=headers)
+        return cls._build(
+            status=True, message=message, data=data, http_status=200, headers=headers
+        )
 
     @classmethod
     def created(
@@ -158,7 +163,9 @@ class RaftResponse:
         headers: dict[str, str] | None = None,
     ) -> RawResponse:
         """201 Created."""
-        return cls._build(status=True, message=message, data=data, http_status=201, headers=headers)
+        return cls._build(
+            status=True, message=message, data=data, http_status=201, headers=headers
+        )
 
     @classmethod
     def no_content(cls, message: str = "No Content") -> RawResponse:

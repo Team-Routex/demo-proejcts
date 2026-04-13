@@ -16,7 +16,6 @@ class CliWebSocketScaffoldTests(unittest.TestCase):
                 api_style="r",
                 use_orm=False,
                 use_scheduler=False,
-                use_celery=False,
                 use_websocket=True,
                 use_env=True,
             )
@@ -40,7 +39,6 @@ class CliWebSocketScaffoldTests(unittest.TestCase):
                 api_style="r",
                 use_orm=False,
                 use_scheduler=False,
-                use_celery=False,
                 use_websocket=False,
                 use_env=True,
             )

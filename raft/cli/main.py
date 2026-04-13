@@ -14,9 +14,8 @@ Built with Click + Rich for a clean terminal experience.
 
 from __future__ import annotations
 
-import os
+import importlib
 import sys
-import json
 from pathlib import Path
 
 import click
@@ -24,6 +23,39 @@ from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
+
+
+def _normalize_app_path(app_path: str) -> str:
+    """Normalize CLI app path into uvicorn's ``module:attribute`` format."""
+    path = app_path.strip()
+    if not path:
+        return "app:app"
+    if ":" not in path:
+        return f"{path}:app"
+    return path
+
+
+def _default_asgi_entry_module() -> str | None:
+    """Module name used by default for ``app:app`` / ``main:app`` style projects."""
+    if Path("app.py").exists():
+        return "app"
+    if Path("main.py").exists():
+        return "main"
+    return None
+
+
+def _check_default_asgi_importable() -> tuple[bool, str]:
+    """Ensure the default entry module imports and exposes ``app`` (like uvicorn)."""
+    mod_name = _default_asgi_entry_module()
+    if mod_name is None:
+        return True, ""
+    try:
+        module = importlib.import_module(mod_name)
+    except Exception as exc:
+        return False, f"Fix errors in {mod_name}.py so it can be imported: {exc}"
+    if not hasattr(module, "app"):
+        return False, f"Define `app` (e.g. `app = Raft()`) in {mod_name}.py"
+    return True, ""
 
 
 @click.group()
@@ -59,11 +91,6 @@ def init(project_name: str) -> None:
     use_middleware_starter = click.confirm(
         "  Create custom middleware starter file?", default=False
     )
-    use_celery = False
-    if not use_scheduler:
-        use_celery = click.confirm("  Use task queue (Celery)?", default=False)
-    else:
-        console.print("  [dim]Skipping Celery prompt (scheduler selected).[/dim]")
     use_websocket = click.confirm("  Use WebSocket?", default=False)
     use_env = click.confirm("  Use .env file?", default=False)
 
@@ -76,7 +103,6 @@ def init(project_name: str) -> None:
         api_style=api_style,
         use_orm=use_orm,
         use_scheduler=use_scheduler,
-        use_celery=use_celery,
         use_websocket=use_websocket,
         use_env=use_env,
         use_middleware_starter=use_middleware_starter,
@@ -108,12 +134,14 @@ def runserver(
     """Start the development or production server."""
     from raft.server.dev import run_dev_server, run_prod_server
 
+    normalized_app_path = _normalize_app_path(app_path)
+
     if reload:
         console.print("[cyan]Starting Raft dev server (hot-reload)…[/cyan]")
-        run_dev_server(app_path=app_path, host=host, port=port)
+        run_dev_server(app_path=normalized_app_path, host=host, port=port)
     else:
         console.print("[cyan]Starting Raft production server…[/cyan]")
-        run_prod_server(app_path=app_path, host=host, port=port, workers=workers)
+        run_prod_server(app_path=normalized_app_path, host=host, port=port, workers=workers)
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +163,13 @@ def check() -> None:
     app_exists = Path("app.py").exists() or Path("main.py").exists()
     checks.append(("App entry point (app.py)", app_exists, "Create app.py with your Raft() app"))
 
+    # 2b. default ASGI import (catches broken app.py; complements file-exists check)
+    if app_exists:
+        asgi_ok, asgi_hint = _check_default_asgi_importable()
+        checks.append(
+            ("ASGI app import (default app:app)", asgi_ok, asgi_hint or "Import failed"),
+        )
+
     # 3. Secret key
     from decouple import config as decouple_config
     secret = decouple_config("RAFT_SECRET_KEY", default="change-me-in-production")
@@ -150,7 +185,8 @@ def check() -> None:
         except ImportError:
             dep_ok = False
             missing.append(mod)
-    checks.append(("Core dependencies", dep_ok, f"Install missing: {', '.join(missing)}" if missing else ""))
+    dep_hint = f"Install missing: {', '.join(missing)}" if missing else ""
+    checks.append(("Core dependencies", dep_ok, dep_hint))
 
     # 5. pyproject.toml
     pyproject = Path("pyproject.toml").exists()
@@ -185,7 +221,6 @@ def _scaffold_project(
     api_style: str,
     use_orm: bool,
     use_scheduler: bool,
-    use_celery: bool,
     use_websocket: bool,
     use_env: bool,
     use_middleware_starter: bool = False,
@@ -196,14 +231,13 @@ def _scaffold_project(
         base / "routes",
         base / "views",
         base / "schemas",
+        base / "serializers",
     ]
     if use_middleware_starter:
         dirs.append(base / "middleware")
     if use_orm:
         dirs.append(base / "models")
     if use_scheduler:
-        dirs.append(base / "tasks")
-    if use_celery:
         dirs.append(base / "tasks")
     if use_websocket:
         dirs.append(base / "ws")
@@ -228,8 +262,6 @@ def _scaffold_project(
     ]
     if use_orm:
         deps.append('"sqlalchemy>=2.0"')
-    if use_celery:
-        deps.append('"celery>=5.3"')
     if use_websocket:
         deps.append('"websockets>=12.0"')
     if api_style == "g":
@@ -331,32 +363,10 @@ RAFT_LOG_LEVEL=info
         scheduler_enabled=("Yes" if use_scheduler else "No"),
         middleware_starter_enabled=("Yes" if use_middleware_starter else "No"),
         orm_enabled=("Yes" if use_orm else "No"),
-        celery_enabled=("Yes" if use_celery else "No"),
         websocket_enabled=("Yes" if use_websocket else "No"),
         env_enabled=("Yes" if use_env else "No"),
     )
     (base / "README.md").write_text(generated_readme, encoding="utf-8")
-
-    # Bootstrap manifest helps users understand exactly what was generated.
-    bootstrap_manifest = {
-        "project_name": project_name,
-        "api_style": "graphql" if api_style == "g" else "rest",
-        "features": {
-            "openapi": use_openapi,
-            "graphql": api_style == "g",
-            "orm": use_orm,
-            "scheduler": use_scheduler,
-            "middleware_starter": use_middleware_starter,
-            "celery": use_celery,
-            "websocket": use_websocket,
-            "env": use_env,
-        },
-        "directories": sorted(str(d.relative_to(base)).replace("\\", "/") for d in dirs if d != base),
-    }
-    (base / "bootstrap.structure.json").write_text(
-        json.dumps(bootstrap_manifest, indent=2),
-        encoding="utf-8",
-    )
 
     if api_style == "g":
         (base / "graphql_schema" / "query.py").write_text(_GRAPHQL_QUERY_TEMPLATE, encoding="utf-8")
@@ -384,14 +394,11 @@ _REST_APP_TEMPLATE = '''"""
 """
 
 from raft import Raft, RaftResponse
-from routes.home import router as home_router
 {scheduler_import}
 {websocket_import}
 
+# Routers under ``routes/`` (each module's ``router``) are auto-included.
 app = Raft()
-
-# Register route modules
-app.include_router(home_router)
 {scheduler_setup}
 {websocket_setup}
 
@@ -415,6 +422,7 @@ from graphql_schema.query import Query
 {scheduler_import}
 {websocket_import}
 
+# REST routers under ``routes/`` are auto-included; GraphQL is mounted below.
 app = Raft()
 {scheduler_setup}
 {websocket_setup}
@@ -600,7 +608,6 @@ Generated by `raft init`.
 - Built-in Task Scheduler: {scheduler_enabled}
 - Custom Middleware Starter: {middleware_starter_enabled}
 - ORM (RaftSql): {orm_enabled}
-- Task Queue (Celery): {celery_enabled}
 - WebSocket: {websocket_enabled}
 - .env File: {env_enabled}
 
@@ -614,5 +621,6 @@ raft runserver
 ## App Entry
 
 - Main app file: `app.py`
+- Add `routes/your_module.py` with a module-level `router = Router(...)` to register URLs (auto-discovered).
 - Health route example: `GET /home/health`
 '''

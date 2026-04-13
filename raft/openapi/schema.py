@@ -24,6 +24,35 @@ from typing import Any
 from pydantic import BaseModel
 
 from raft.core.router import Route, Router
+from raft.serialization.registry import registered_serializers
+
+# ---------------------------------------------------------------------------
+# JSON Schema → OpenAPI (strip framework-only keys from Pydantic output)
+# ---------------------------------------------------------------------------
+
+
+def _strip_internal_json_schema_keys(obj: Any) -> Any:
+    """Drop ``raft_*`` entries so Swagger/OpenAPI only show standard JSON Schema."""
+    if isinstance(obj, dict):
+        return {
+            str(k): _strip_internal_json_schema_keys(v)
+            for k, v in obj.items()
+            if not (isinstance(k, str) and k.startswith("raft_"))
+        }
+    if isinstance(obj, list):
+        return [_strip_internal_json_schema_keys(x) for x in obj]
+    return obj
+
+
+def _pydantic_model_openapi_schema(
+    model: type[BaseModel],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """``model_json_schema()`` root and ``$defs``, with internal ``raft_*`` keys stripped."""
+    raw = model.model_json_schema()
+    defs = raw.pop("$defs", {})
+    cleaned_defs = {k: _strip_internal_json_schema_keys(v) for k, v in defs.items()}
+    root = _strip_internal_json_schema_keys(raw)
+    return root, cleaned_defs
 
 
 # ---------------------------------------------------------------------------
@@ -51,10 +80,14 @@ _RAFT_RESPONSE_SCHEMA: dict[str, Any] = {
         "errors": {
             "type": "array",
             "items": {"type": "string"},
-            "description": "Validation / error detail strings",
-            "example": [],
+            "description": (
+                "Omitted on success (status true). On failure, omitted unless there "
+                "is at least one non-empty error string."
+            ),
+            "example": ["field: invalid value"],
         },
     },
+    "required": ["status", "message"],
 }
 
 
@@ -120,6 +153,8 @@ def build_openapi_schema(
             )
             paths[openapi_path][method.lower()] = operation
 
+    _merge_registered_serializer_schemas(components_schemas)
+
     schema: dict[str, Any] = {
         "openapi": "3.0.3",
         "info": {
@@ -142,6 +177,21 @@ def build_openapi_schema(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _merge_registered_serializer_schemas(components_schemas: dict[str, Any]) -> None:
+    """Add autodiscovered serializer models so Swagger lists reusable schemas."""
+    for cls in registered_serializers().values():
+        if not isinstance(cls, type) or not issubclass(cls, BaseModel):
+            continue
+        schema_name = cls.__name__
+        if schema_name in components_schemas:
+            continue
+        model_schema, defs = _pydantic_model_openapi_schema(cls)
+        for k, v in defs.items():
+            if k not in components_schemas:
+                components_schemas[k] = v
+        components_schemas[schema_name] = model_schema
+
 
 def _build_operation(
     route: Route,
@@ -192,10 +242,10 @@ def _add_request_body(
         return
 
     schema_name = model.__name__
-    model_schema = model.model_json_schema()
+    model_schema, defs = _pydantic_model_openapi_schema(model)
 
     # Hoist Pydantic $defs (nested model schemas) into components
-    for k, v in model_schema.pop("$defs", {}).items():
+    for k, v in defs.items():
         components_schemas[k] = v
 
     components_schemas[schema_name] = model_schema
@@ -235,8 +285,8 @@ def _build_responses(
             elif isinstance(value, type) and issubclass(value, BaseModel):
                 # Pydantic model → register + reference
                 schema_name = value.__name__
-                model_schema = value.model_json_schema()
-                for k, v in model_schema.pop("$defs", {}).items():
+                model_schema, defs = _pydantic_model_openapi_schema(value)
+                for k, v in defs.items():
                     components_schemas[k] = v
                 components_schemas[schema_name] = model_schema
 

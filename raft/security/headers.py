@@ -15,8 +15,12 @@ Headers applied:
     - ``Strict-Transport-Security`` (HSTS) — enforces HTTPS (prod only)
     - ``Content-Security-Policy`` — basic default-src policy
 
+OpenAPI / Swagger / ReDoc HTML responses set their own ``Content-Security-Policy``
+header so CDN scripts (unpkg, jsDelivr) and small inline bootstrappers work;
+``setdefault`` here does not override an existing policy.
+
 PROTOTYPE NOTE:
-    The CSP policy here is intentionally loose (``default-src 'self'``).
+    The default CSP here is ``default-src 'self'`` for normal JSON/HTML pages.
     Production applications should craft a strict CSP tailored to their
     asset domains and inline-script needs.
 """
