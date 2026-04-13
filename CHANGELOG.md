@@ -24,6 +24,7 @@ Framework = `raft/` package, `raft` CLI, and `raft init` scaffold output (not th
 - **`raft.openapi.schema`:** Pydantic `model_json_schema()` output is sanitized before merge into `components/schemas` so internal `raft_*` keys do not appear in Swagger.
 - **`raft.security.headers`:** documented that doc pages may set their own `Content-Security-Policy` first; middleware uses `setdefault` and does not overwrite it.
 - **`raft init` / scaffold:** no longer writes `bootstrap.structure.json`; Celery prompt removed and `celery` omitted from generated `pyproject.toml`; generated REST `app.py` relies on route autodiscovery instead of manually `include_router` for `routes/home.py`; generated README adjustments.
+- **`raft init` / scaffold:** no longer creates a `schemas/` package or `schemas/user.py`. New projects get `serializers/user.py` with `CreateUserSerializer` and `UpdateUserSerializer` (Raft `Serializer` + field helpers) and a `serializers/__init__.py` that re-exports them.
 
 ### Fixed
 

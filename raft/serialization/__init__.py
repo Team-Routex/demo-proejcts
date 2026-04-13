@@ -2,6 +2,7 @@
 
 from raft.serialization.base import Serializer, validation_error
 from raft.serialization.fields import BooleanField, CharField, EmailField, IntegerField
+from raft.serialization.model import ModelSerializer
 from raft.serialization.registry import (
     clear_serializer_registry,
     register_serializer,
@@ -11,6 +12,7 @@ from raft.serialization.registry import (
 
 __all__ = [
     "Serializer",
+    "ModelSerializer",
     "validation_error",
     "IntegerField",
     "CharField",

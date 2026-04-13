@@ -22,13 +22,23 @@ class CliBootstrapStructureTests(unittest.TestCase):
             )
 
             self.assertTrue((base / "routes").exists())
-            self.assertTrue((base / "schemas").exists())
+            self.assertFalse((base / "schemas").exists())
             self.assertTrue((base / "serializers").exists())
+            self.assertTrue((base / "serializers" / "user.py").exists())
             self.assertFalse((base / "tasks").exists())
             self.assertFalse((base / "ws").exists())
             self.assertFalse((base / "graphql_schema").exists())
             self.assertFalse((base / "middleware").exists())
+            self.assertFalse((base / "models").exists())
+            self.assertFalse((base / "setraft.py").exists())
             self.assertFalse((base / "bootstrap.structure.json").exists())
+
+            pyproject_content = (base / "pyproject.toml").read_text(encoding="utf-8")
+            self.assertNotIn("sqlalchemy", pyproject_content)
+            self.assertNotIn("raftsql", pyproject_content)
+
+            app_content = (base / "app.py").read_text(encoding="utf-8")
+            self.assertNotIn("raftsql.setup()", app_content)
 
     def test_full_bootstrap_includes_selected_feature_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -49,8 +59,19 @@ class CliBootstrapStructureTests(unittest.TestCase):
             self.assertTrue((base / "ws").exists())
             self.assertTrue((base / "graphql_schema").exists())
             self.assertTrue((base / "models").exists())
+            self.assertTrue((base / "models" / "user.py").exists())
+            self.assertTrue((base / "setraft.py").exists())
             self.assertTrue((base / "middleware").exists())
             self.assertFalse((base / "bootstrap.structure.json").exists())
+
+            pyproject_content = (base / "pyproject.toml").read_text(encoding="utf-8")
+            self.assertIn("raftsql", pyproject_content)
+            self.assertIn("psycopg2-binary", pyproject_content)
+            self.assertIn("asyncpg", pyproject_content)
+            self.assertNotIn("sqlalchemy", pyproject_content)
+
+            app_content = (base / "app.py").read_text(encoding="utf-8")
+            self.assertIn("raftsql.setup()", app_content)
 
 
 if __name__ == "__main__":

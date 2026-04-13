@@ -230,7 +230,6 @@ def _scaffold_project(
         base,
         base / "routes",
         base / "views",
-        base / "schemas",
         base / "serializers",
     ]
     if use_middleware_starter:
@@ -261,7 +260,14 @@ def _scaffold_project(
         '"python-decouple>=3.8"',
     ]
     if use_orm:
-        deps.append('"sqlalchemy>=2.0"')
+        deps.extend(
+            [
+                '"raftsql>=1.0.0"',
+                '"psycopg2-binary>=2.9.0"',
+                '"asyncpg>=0.29.0"',
+                '"python-dotenv>=1.0.0"',
+            ]
+        )
     if use_websocket:
         deps.append('"websockets>=12.0"')
     if api_style == "g":
@@ -292,13 +298,24 @@ RAFT_PORT=8000
 RAFT_ALLOWED_HOSTS=*
 RAFT_CORS_ALLOWED_ORIGINS=*
 RAFT_LOG_LEVEL=info
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME={project_name}
 """
-        (base / ".env").write_text(env_content, encoding="utf-8")
+        (base / ".env").write_text(env_content.format(project_name=project_name), encoding="utf-8")
+
+    # setraft.py (RaftSQL settings)
+    if use_orm:
+        (base / "setraft.py").write_text(_SETRAFT_TEMPLATE, encoding="utf-8")
 
     # app.py — main entry point
     if api_style == "g":
         app_code = _GRAPHQL_APP_TEMPLATE.format(
             project_name=project_name,
+            orm_import=("import raftsql\n" if use_orm else ""),
+            orm_setup=("raftsql.setup()\n" if use_orm else ""),
             scheduler_import=(
                 "from tasks.scheduler import register_scheduled_tasks\n"
                 if use_scheduler
@@ -323,6 +340,8 @@ RAFT_LOG_LEVEL=info
     else:
         app_code = _REST_APP_TEMPLATE.format(
             project_name=project_name,
+            orm_import=("import raftsql\n" if use_orm else ""),
+            orm_setup=("raftsql.setup()\n" if use_orm else ""),
             scheduler_import=(
                 "from tasks.scheduler import register_scheduled_tasks\n"
                 if use_scheduler
@@ -349,8 +368,13 @@ RAFT_LOG_LEVEL=info
     # routes/home.py
     (base / "routes" / "home.py").write_text(_HOME_ROUTE_TEMPLATE, encoding="utf-8")
 
-    # schemas/user.py
-    (base / "schemas" / "user.py").write_text(_USER_SCHEMA_TEMPLATE, encoding="utf-8")
+    # serializers/user.py — request validation via Raft Serializer (Pydantic-based)
+    (base / "serializers" / "user.py").write_text(_USER_SERIALIZER_TEMPLATE, encoding="utf-8")
+    (base / "serializers" / "__init__.py").write_text(_SERIALIZERS_INIT_TEMPLATE, encoding="utf-8")
+
+    if use_orm:
+        (base / "models" / "user.py").write_text(_USER_MODEL_TEMPLATE, encoding="utf-8")
+        (base / "models" / "__init__.py").write_text(_MODELS_INIT_TEMPLATE, encoding="utf-8")
 
     # Checker file
     (base / "raft_check.py").write_text(_CHECKER_TEMPLATE, encoding="utf-8")
@@ -369,11 +393,20 @@ RAFT_LOG_LEVEL=info
     (base / "README.md").write_text(generated_readme, encoding="utf-8")
 
     if api_style == "g":
-        (base / "graphql_schema" / "query.py").write_text(_GRAPHQL_QUERY_TEMPLATE, encoding="utf-8")
+        (base / "graphql_schema" / "query.py").write_text(
+            _GRAPHQL_QUERY_TEMPLATE,
+            encoding="utf-8",
+        )
 
     if use_scheduler:
-        (base / "tasks" / "scheduler.py").write_text(_TASK_SCHEDULER_TEMPLATE, encoding="utf-8")
-        (base / "tasks" / "periodic.py").write_text(_TASKS_AUTODISCOVERY_TEMPLATE, encoding="utf-8")
+        (base / "tasks" / "scheduler.py").write_text(
+            _TASK_SCHEDULER_TEMPLATE,
+            encoding="utf-8",
+        )
+        (base / "tasks" / "periodic.py").write_text(
+            _TASKS_AUTODISCOVERY_TEMPLATE,
+            encoding="utf-8",
+        )
 
     if use_websocket:
         (base / "ws" / "chat.py").write_text(_WS_CHAT_TEMPLATE, encoding="utf-8")
@@ -394,10 +427,12 @@ _REST_APP_TEMPLATE = '''"""
 """
 
 from raft import Raft, RaftResponse
+{orm_import}
 {scheduler_import}
 {websocket_import}
 
 # Routers under ``routes/`` (each module's ``router``) are auto-included.
+{orm_setup}
 app = Raft()
 {scheduler_setup}
 {websocket_setup}
@@ -419,10 +454,12 @@ import strawberry
 from raft import Raft, RaftResponse
 from raft.graphql.integration import GraphQLRouter
 from graphql_schema.query import Query
+{orm_import}
 {scheduler_import}
 {websocket_import}
 
 # REST routers under ``routes/`` are auto-included; GraphQL is mounted below.
+{orm_setup}
 app = Raft()
 {scheduler_setup}
 {websocket_setup}
@@ -457,23 +494,70 @@ async def health(request):
     return RaftResponse.ok(message="OK", data={"healthy": True})
 '''
 
-_USER_SCHEMA_TEMPLATE = '''"""User validation schemas."""
+_USER_SERIALIZER_TEMPLATE = '''"""User request serializers."""
 
-from pydantic import BaseModel, EmailStr
-
-
-class CreateUserSchema(BaseModel):
-    """Schema for creating a new user."""
-    name: str
-    email: str  # Use EmailStr if email-validator is installed.
-    age: int | None = None
+from raft import Serializer
+from raft.serialization import CharField, EmailField, IntegerField
 
 
-class UpdateUserSchema(BaseModel):
-    """Schema for updating user fields."""
-    name: str | None = None
-    email: str | None = None
-    age: int | None = None
+class CreateUserSerializer(Serializer):
+    """Inbound body for creating a user."""
+
+    name: str = CharField()
+    email: str = EmailField()
+    age: int | None = IntegerField(default=None)
+
+
+class UpdateUserSerializer(Serializer):
+    """Inbound body for partial user updates."""
+
+    name: str | None = CharField(default=None)
+    email: str | None = EmailField(default=None)
+    age: int | None = IntegerField(default=None)
+'''
+
+_SERIALIZERS_INIT_TEMPLATE = '''from .user import CreateUserSerializer, UpdateUserSerializer
+
+__all__ = ["CreateUserSerializer", "UpdateUserSerializer"]
+'''
+
+_SETRAFT_TEMPLATE = '''"""RaftSQL project configuration."""
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
+
+DATABASE = {
+    "ENGINE": "postgresql",
+    "HOST": os.getenv("DB_HOST", "localhost"),
+    "PORT": int(os.getenv("DB_PORT", 5432)),
+    "USER": os.getenv("DB_USER", "postgres"),
+    "PASSWORD": os.getenv("DB_PASSWORD", ""),
+    "NAME": os.getenv("DB_NAME", "postgres"),
+}
+'''
+
+_USER_MODEL_TEMPLATE = '''"""ORM model examples."""
+
+from raftsql import models
+
+
+class User(models.Model):
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=120)
+    email = models.EmailField(unique=True)
+
+    class Meta:
+        db_table = "users"
+'''
+
+_MODELS_INIT_TEMPLATE = '''from .user import User
+
+__all__ = ["User"]
 '''
 
 _CHECKER_TEMPLATE = '''"""
@@ -621,6 +705,7 @@ raft runserver
 ## App Entry
 
 - Main app file: `app.py`
-- Add `routes/your_module.py` with a module-level `router = Router(...)` to register URLs (auto-discovered).
+- Add `routes/your_module.py` with a module-level
+  `router = Router(...)` to register URLs (auto-discovered).
 - Health route example: `GET /home/health`
 '''

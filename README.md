@@ -353,7 +353,7 @@ Invalid input automatically returns a JSON body with `status: false`, a message,
 
 ### Serializers (optional)
 
-`Serializer` extends Pydantic with field helpers, read/write flags, and validation hooks. Use it with `validate_body` like any model, or wire it per route for OpenAPI request bodies.
+`Serializer` extends Pydantic with field helpers, read/write flags, and validation hooks. Use it with `validate_body` like any model, or wire it per route for OpenAPI request bodies. Projects created with `raft init` include a starter `serializers/user.py` you can rename or replace.
 
 ```python
 from raft import Serializer, validation_error
@@ -557,6 +557,8 @@ $ raft init myproject
 ```
 
 If `Use GraphQL?` is `No`, the scaffold stays REST-only (no `graphql_schema/` and no `strawberry-graphql` dependency).
+
+Every new project includes `app.py`, `routes/` (with `home.py`), `views/`, and **`serializers/`** with a starter `serializers/user.py` (`CreateUserSerializer`, `UpdateUserSerializer`) and `serializers/__init__.py` exports. **`raft init` does not create a `schemas/` folder**—put request/response types in `serializers/` (Raft `Serializer`) or define plain Pydantic `BaseModel` classes alongside your code if you prefer. Optional directories are added when you enable the matching prompts: `tasks/`, `ws/`, `middleware/`, `models/` (ORM), and `graphql_schema/` (GraphQL).
 
 ### `raft runserver`
 ```bash
