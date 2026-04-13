@@ -184,7 +184,7 @@ class Raft:
         self.router.add_route(route)
 
     def add_routes(self, routes: list[Route]) -> None:
-        """Register multiple Route objects (Django urlpatterns style)."""
+        """Register multiple ``Route`` objects at once (URL-conf list style)."""
         self._chain = None
         self.router.add_routes(routes)
 

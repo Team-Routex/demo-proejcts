@@ -2,7 +2,7 @@
 Raft Framework
 ==============
 
-A Django-like Python web framework with hybrid routing, built on ASGI.
+A Python web framework with hybrid routing, built on ASGI.
 
 Raft provides:
 - Hybrid routing (decorator + URL-conf style)

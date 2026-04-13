@@ -1,7 +1,7 @@
 [project]
 name = "raft-framework"
 version = "0.1.0"
-description = "Raft Framework — A Django-like Python web framework with hybrid routing, built on ASGI."
+description = "Raft Framework — A Python web framework with hybrid routing, built on ASGI."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12"

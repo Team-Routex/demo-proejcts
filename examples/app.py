@@ -228,7 +228,7 @@ app.add_route(Route("/items/{id}", ItemView))
 
 
 # =========================================================================
-# 10. Modular router (Django urlpatterns style)
+# 10. Modular router (URL-conf list)
 #     FBVs are registered via add_routes() — no decorator, no as_view().
 # =========================================================================
 

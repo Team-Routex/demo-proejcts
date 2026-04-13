@@ -1,8 +1,8 @@
 # Raft Framework
 
-**A Django-like Python web framework with hybrid routing, built on ASGI.**
+**A Python web framework with hybrid routing, built on ASGI.**
 
-Raft is a prototype web framework that combines Django's developer experience with modern async Python, Pydantic validation, and a hybrid routing system that supports both decorator and URL-conf styles.
+Raft is a prototype web framework that combines a structured, batteries-included developer experience with modern async Python, Pydantic validation, and a hybrid routing system that supports both decorator and URL-conf styles.
 
 ---
 
@@ -10,10 +10,10 @@ Raft is a prototype web framework that combines Django's developer experience wi
 
 Raft Framework aims to be a **beginner-friendly, production-aware** Python web framework with:
 
-- **Django-like DX** — familiar project structure, CBVs, URL-conf routing
+- **Structured DX** — familiar project layout, class-based views, URL-conf routing
 - **Modern Python** — async/await everywhere, type hints, Pydantic v2
 - **ASGI-native** — built for uvicorn, supports async middleware pipelines
-- **Hybrid routing** — use decorators (Flask-style) or URL lists (Django-style), or mix both
+- **Hybrid routing** — use decorators (Flask-style) or centralized URL lists (URL-conf), or mix both
 - **Batteries included** — sessions, security headers, CORS, CSRF, Pydantic validation, optional serializers + OpenAPI, optional GraphQL, task scheduling, WebSocket routes
 - **CLI scaffolding** — `raft init` creates projects interactively
 - **UV-compatible** — works seamlessly with the `uv` package manager
@@ -426,7 +426,7 @@ async def request_id_middleware(request, call_next):
     return response
 ```
 
-### Django-Style URL Patterns
+### Centralized URL patterns (URL-conf)
 ```python
 from raft import Router, Route
 
@@ -528,7 +528,7 @@ async def room_chat(ws):
         await ws.send_room(room, text)
 ```
 
-This is intentionally simpler than Django Channels: no separate consumer classes or channel layers required for basic usage.
+This is intentionally lightweight: no separate consumer classes or channel layers required for basic usage.
 
 ---
 
@@ -735,7 +735,7 @@ uv sync --locked
 | **Rate Limiting** | Medium | Token bucket middleware |
 | **Auth Module** | Medium | JWT + session auth with user model |
 | **Testing Utilities** | Medium | `RaftTestClient` for easy async testing |
-| **Signals / Events** | Low | Django-like signal system for app lifecycle hooks |
+| **Signals / Events** | Low | Event-style hooks for app lifecycle |
 | **Admin Panel** | Low | Auto-generated admin interface |
 | **Caching** | Low | Response caching middleware + cache API |
 | **i18n** | Low | Internationalization support |

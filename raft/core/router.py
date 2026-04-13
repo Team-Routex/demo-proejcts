@@ -3,7 +3,7 @@ raft.core.router
 ~~~~~~~~~~~~~~~~
 
 Hybrid routing system: supports both **decorator-style** and
-**URL-conf style** (Django-like) route registration.
+**URL-conf style** (central route table) registration.
 
 Decorator style::
 
@@ -185,7 +185,7 @@ class Router:
         self._routes.append(route)
 
     def add_routes(self, routes: list[Route]) -> None:
-        """Register multiple ``Route`` objects at once (Django-style urlpatterns)."""
+        """Register multiple ``Route`` objects at once (URL-conf list)."""
         for r in routes:
             self.add_route(r)
 
