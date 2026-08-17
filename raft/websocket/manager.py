@@ -39,8 +39,14 @@ class WebSocketManager:
     async def send_to_room(self, room: str, message: str) -> None:
         members = list(self._rooms.get(room, set()))
         for websocket in members:
-            await websocket.send_text(message)
+            try:
+                await websocket.send_text(message)
+            except Exception:
+                self.disconnect(websocket)
 
     async def broadcast(self, message: str) -> None:
         for websocket in list(self._connections):
-            await websocket.send_text(message)
+            try:
+                await websocket.send_text(message)
+            except Exception:
+                self.disconnect(websocket)

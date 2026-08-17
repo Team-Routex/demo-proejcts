@@ -4,7 +4,7 @@ raft.core.response
 
 Structured JSON response helpers.
 
-Every Raft response follows a unified envelope::
+Every JSON response follows a unified envelope::
 
     {
         "status": true,
@@ -13,15 +13,19 @@ Every Raft response follows a unified envelope::
     }
 
 The ``errors`` key is **only** included on **failed** responses (``status: false``)
-when there is at least one non-empty error string. It is never sent on success
-(``status: true``), even if a caller mistakenly passes error strings.
+when there is at least one non-empty error string.
 
-``RaftResponse`` provides class methods for common HTTP status codes so
-view code stays concise:
+Primary API::
 
-    return RaftResponse.ok(data={"id": 1})
-    return RaftResponse.created(data=user_dict)
-    return RaftResponse.bad_request(errors=["Name is required"])
+    return Response.success(data={"id": 1})
+    return Response.error(message="Invalid", errors=["name: required"], http_status=400)
+
+Subclass ``Response`` to add project-specific helpers::
+
+    class APIResponse(Response):
+        @classmethod
+        def paginated(cls, items, total, page):
+            return cls.success(data={"items": items, "total": total, "page": page})
 
 For non-JSON responses (HTML, redirects, files), use ``RawResponse``.
 """
@@ -34,14 +38,7 @@ from typing import Any
 
 
 class RawResponse:
-    """Low-level ASGI HTTP response.
-
-    Parameters:
-        body: Response body bytes.
-        status_code: HTTP status code.
-        headers: Extra headers as ``{name: value}``.
-        content_type: MIME content type.
-    """
+    """Low-level ASGI HTTP response."""
 
     def __init__(
         self,
@@ -65,6 +62,7 @@ class RawResponse:
         httponly: bool = True,
         secure: bool = False,
         samesite: str = "Lax",
+        domain: str | None = None,
     ) -> None:
         """Set a cookie on this response."""
         self._cookies[name] = value
@@ -76,12 +74,17 @@ class RawResponse:
             morsel["max-age"] = str(max_age)
         if secure:
             morsel["secure"] = True  # type: ignore[assignment]
+        if domain:
+            morsel["domain"] = domain
 
-    def delete_cookie(self, name: str, path: str = "/") -> None:
+    def delete_cookie(
+        self,
+        name: str,
+        path: str = "/",
+        domain: str | None = None,
+    ) -> None:
         """Expire a cookie immediately."""
-        self.set_cookie(name, "", max_age=0, path=path)
-
-    # ---- ASGI send -------------------------------------------------------
+        self.set_cookie(name, "", max_age=0, path=path, domain=domain)
 
     async def send(self, send: Any) -> None:
         """Serialize this response over the ASGI *send* callable."""
@@ -91,11 +94,8 @@ class RawResponse:
         for k, v in self.headers.items():
             raw_headers.append((k.lower().encode(), v.encode()))
 
-        # Append Set-Cookie headers
         for morsel in self._cookies.values():
-            raw_headers.append(
-                (b"set-cookie", morsel.OutputString().encode())
-            )
+            raw_headers.append((b"set-cookie", morsel.OutputString().encode()))
 
         await send(
             {
@@ -107,15 +107,18 @@ class RawResponse:
         await send({"type": "http.response.body", "body": self.body})
 
 
-class RaftResponse:
+class Response:
     """Factory for structured JSON responses.
 
-    Every method returns a ``RawResponse`` whose body follows the unified
-    Raft envelope format.
+    Use :meth:`success` and :meth:`error` as the primary API. Named helpers
+    (``created``, ``not_found``, etc.) delegate to those methods. Subclass
+    to add custom response shapes for your application.
     """
 
-    @staticmethod
-    def _build(
+    @classmethod
+    def build(
+        cls,
+        *,
         status: bool,
         message: str,
         data: dict[str, Any] | list[Any] | None = None,
@@ -123,6 +126,7 @@ class RaftResponse:
         http_status: int = 200,
         headers: dict[str, str] | None = None,
     ) -> RawResponse:
+        """Low-level builder — override in subclasses for custom envelopes."""
         payload: dict[str, Any] = {
             "status": status,
             "message": message,
@@ -141,19 +145,47 @@ class RaftResponse:
             content_type="application/json",
         )
 
-    # -- Success helpers ---------------------------------------------------
+    # ── Primary API ───────────────────────────────────────────────────────
 
     @classmethod
-    def ok(
+    def success(
         cls,
         message: str = "Success",
         data: dict[str, Any] | list[Any] | None = None,
+        *,
+        http_status: int = 200,
         headers: dict[str, str] | None = None,
     ) -> RawResponse:
-        """200 OK."""
-        return cls._build(
-            status=True, message=message, data=data, http_status=200, headers=headers
+        """Successful JSON response (default 200)."""
+        return cls.build(
+            status=True,
+            message=message,
+            data=data,
+            http_status=http_status,
+            headers=headers,
         )
+
+    @classmethod
+    def error(
+        cls,
+        message: str = "Error",
+        errors: list[str] | None = None,
+        *,
+        http_status: int = 400,
+        data: dict[str, Any] | list[Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> RawResponse:
+        """Failed JSON response (default 400)."""
+        return cls.build(
+            status=False,
+            message=message,
+            data=data,
+            errors=errors,
+            http_status=http_status,
+            headers=headers,
+        )
+
+    # ── Success shortcuts ─────────────────────────────────────────────────
 
     @classmethod
     def created(
@@ -163,16 +195,14 @@ class RaftResponse:
         headers: dict[str, str] | None = None,
     ) -> RawResponse:
         """201 Created."""
-        return cls._build(
-            status=True, message=message, data=data, http_status=201, headers=headers
-        )
+        return cls.success(message, data, http_status=201, headers=headers)
 
     @classmethod
     def no_content(cls, message: str = "No Content") -> RawResponse:
         """204 No Content."""
-        return cls._build(status=True, message=message, http_status=204)
+        return cls.success(message, None, http_status=204)
 
-    # -- Error helpers -----------------------------------------------------
+    # ── Error shortcuts ───────────────────────────────────────────────────
 
     @classmethod
     def bad_request(
@@ -181,7 +211,7 @@ class RaftResponse:
         errors: list[str] | None = None,
     ) -> RawResponse:
         """400 Bad Request."""
-        return cls._build(status=False, message=message, errors=errors, http_status=400)
+        return cls.error(message, errors, http_status=400)
 
     @classmethod
     def unauthorized(
@@ -190,7 +220,7 @@ class RaftResponse:
         errors: list[str] | None = None,
     ) -> RawResponse:
         """401 Unauthorized."""
-        return cls._build(status=False, message=message, errors=errors, http_status=401)
+        return cls.error(message, errors, http_status=401)
 
     @classmethod
     def forbidden(
@@ -199,7 +229,7 @@ class RaftResponse:
         errors: list[str] | None = None,
     ) -> RawResponse:
         """403 Forbidden."""
-        return cls._build(status=False, message=message, errors=errors, http_status=403)
+        return cls.error(message, errors, http_status=403)
 
     @classmethod
     def not_found(
@@ -208,7 +238,7 @@ class RaftResponse:
         errors: list[str] | None = None,
     ) -> RawResponse:
         """404 Not Found."""
-        return cls._build(status=False, message=message, errors=errors, http_status=404)
+        return cls.error(message, errors, http_status=404)
 
     @classmethod
     def method_not_allowed(
@@ -217,7 +247,7 @@ class RaftResponse:
         errors: list[str] | None = None,
     ) -> RawResponse:
         """405 Method Not Allowed."""
-        return cls._build(status=False, message=message, errors=errors, http_status=405)
+        return cls.error(message, errors, http_status=405)
 
     @classmethod
     def unprocessable(
@@ -225,8 +255,8 @@ class RaftResponse:
         message: str = "Validation Error",
         errors: list[str] | None = None,
     ) -> RawResponse:
-        """422 Unprocessable Entity (validation errors)."""
-        return cls._build(status=False, message=message, errors=errors, http_status=422)
+        """422 Unprocessable Entity."""
+        return cls.error(message, errors, http_status=422)
 
     @classmethod
     def internal_error(
@@ -235,7 +265,7 @@ class RaftResponse:
         errors: list[str] | None = None,
     ) -> RawResponse:
         """500 Internal Server Error."""
-        return cls._build(status=False, message=message, errors=errors, http_status=500)
+        return cls.error(message, errors, http_status=500)
 
     @classmethod
     def custom(
@@ -247,8 +277,8 @@ class RaftResponse:
         http_status: int = 200,
         headers: dict[str, str] | None = None,
     ) -> RawResponse:
-        """Build a response with a fully custom status code."""
-        return cls._build(
+        """Build a response with explicit success/failure and HTTP status."""
+        return cls.build(
             status=status,
             message=message,
             data=data,
@@ -256,3 +286,7 @@ class RaftResponse:
             http_status=http_status,
             headers=headers,
         )
+
+
+# Deprecated alias — use Response
+RaftResponse = Response

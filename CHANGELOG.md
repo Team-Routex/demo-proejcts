@@ -11,20 +11,45 @@ Framework = `raft/` package, `raft` CLI, and `raft init` scaffold output (not th
 
 ### Added
 
-- **Route autodiscovery (`raft.core.app.Raft`):** loads routers from `routes/*.py` under the project root (skips `__init__.py` and `_*.py`). Each module may export `router` or `ROUTERS`. Settings: `RAFT_AUTO_DISCOVER_ROUTES`, `RAFT_ROUTES_DIR`. Opt out with `Raft(auto_discover_routes=False)`.
+- **Redis (built-in):** `redis` is a core dependency. Opt in with `RAFT_REDIS_URL` / `RAFT_REDIS_PREFIX`; helpers `get_redis()`, `redis_configured()`, `redis_key()`. Sessions: `RAFT_SESSION_BACKEND=memory|redis`. No separate package install or extra required.
+- **JWT auth (`raft.auth`):** `create_access_token`, `decode_access_token`, `get_bearer_token`, `@require_auth()`, optional `jwt_auth_middleware`. Settings: `RAFT_JWT_SECRET` (falls back to `RAFT_SECRET_KEY`), `RAFT_JWT_ALGORITHM` (HS256), `RAFT_JWT_EXPIRE_MINUTES`. Depends on `PyJWT`.
+- **View auth on views:** `authentication_classes` / `permission_classes` on CBVs (`JWTAuthentication`, `IsAuthenticated`, `AllowAny`); on `@app.get` / `@router.post` / table `route(...)` as kwargs; FBV decorators `@authentication_classes` / `@permission_classes`. Sets `request.user` and `request.auth`.
+- **CLI redesign:** figlet banner (`pyfiglet`) + Rich panels/tables for `raft`, `init`, `runserver`, `check`, and new `raft version`. Scaffolding moved to `raft.cli.scaffold`; shared UI in `raft.cli.ui`.
+- **Project commands (`raft run`):** Django-style management scripts in ``commands/`` via ``@command``; ``raft run seed``, ``raft run --help``. Configurable with ``RAFT_COMMANDS_DIR`` (default ``commands``).
+- **Serializers rebuilt (`raft.serialization`):** Django-style ``Serializer``, ``StrField`` / ``IntField`` / ``EmailField``, ``validate_body`` / ``validate_query`` / ``validate_form``, read/write flags, OpenAPI via ``request_serializer`` / ``response_serializer``.
+- **Multipart hardened:** ``request.form()`` / ``request.files()`` use ``python-multipart``.
+- **Rate limiting:** opt-in middleware ``RAFT_RATE_LIMIT_ENABLED`` with memory or Redis backend; reverse-proxy patterns documented in ``DEPLOYMENT.md``.
+- **Deployment guide:** ``DEPLOYMENT.md`` (workers, Redis, secrets, OpenAPI off, HSTS, rate limits).
+- **Documentation site:** ``docs/index.html`` — comprehensive HTML/CSS/JS docs (beginner → advanced, searchable).
+- **Dual-Runtime Type Enforcement ("Raft TypeShield"):** `raft.core.type_enforcement` provides automatic HTTP parameter validation and type coercion (`int`, `float`, `bool`, `str`, `bytes`, `uuid.UUID`, `datetime`, `date`, `time`, Pydantic `BaseModel`). Annotated parameters are strictly coerced (returning HTTP 422 Unprocessable Entity on validation failure); unannotated parameters are passed raw without errors. Integrates Mypy static code analysis via `mypy.api.run` (`app.typecheck_routes()` and `raft check`).
+- **Response API:** ``RaftResponse`` renamed to ``Response`` with primary methods ``Response.success()`` and ``Response.error()``; subclass ``Response`` for custom envelopes. ``RaftResponse`` remains a deprecated alias in ``raft.core.response``.
+
+### Breaking
+
+- **`RaftResponse` → `Response`:** import ``from raft import Response``; use ``Response.success()`` instead of ``.ok()``, ``Response.error()`` for failures. OpenAPI envelope schema component renamed to ``Response``.
+- **Sessions (production-oriented):** TTL on memory store, cookie `Secure`/`HttpOnly`/`SameSite`/`Domain` settings, dirty tracking (no empty anonymous cookies), logout clears store + cookie, `session.cycle_key()` for ID rotation after login. Redis backend deletes empty payloads.
+- **Circuit breaker (`raft.resilience`):** built-in `CircuitBreaker` / `get_circuit()` for outbound calls (CLOSED → OPEN → HALF_OPEN). `CircuitOpenError` maps to HTTP 503 when raised in a view. Sync `call`, async `acall`, and decorator usage.
+- **Route autodiscovery (`raft.core.app.Raft`):** project-wide scan for hybrid route modules exporting `router`, `ROUTERS`, or `routes` (`route` / `include`) — not limited to a `routes/` folder. Skips tests/venvs/framework packages. `RAFT_ROUTES_SCAN=project|dir` (default `project`). No manual `app.add_routes()` required. Opt out with `Raft(auto_discover_routes=False)`.
+- **Uniform HTTP routing:** method decorators `@app.get` / `@app.post` / `@app.put` / `@app.patch` / `@app.delete` (and the same on `Router`), plus Django-style `route()` / `include()` / `add_routes()`. `@router.route(methods=[...])` remains for multi-method handlers.
+
 - **`raft check` (CLI):** verifies the default ASGI entry (`app` or `main`) imports and defines an `app` attribute.
-- **`raft.serialization`:** `Serializer` subclass of Pydantic `BaseModel` for shared request/response validation and OpenAPI: `from_payload` / overridden `model_validate` (runs `validate_<field>(self, value)` then `validate(self, attrs)`; optional `validation_error({field: message})`); inbound strip of `read_only` fields; `Serializer(data=…)` / `Serializer(instance=…)`; `.data`, `.validated_data`, `.is_valid()`; instance `to_representation(self, instance)`; class helpers `serialize` / `serialize_many`. Pydantic `field_validator` / `model_validator` remain supported. `validation_error` is exported from `raft` and `raft.serialization`.
-- **Field helpers (`raft.serialization.fields`):** `IntegerField`, `CharField`, `EmailField`, `BooleanField` with optional `read_only` / `write_only` (JSON Schema `readOnly` / `writeOnly`, internal `raft_*` markers stripped in published OpenAPI).
-- **Serializer autodiscovery:** `Raft()` registers `Serializer` subclasses from `serializers/*.py` (`RAFT_AUTO_DISCOVER_SERIALIZERS`, `RAFT_SERIALIZERS_DIR`); `register_serializer` / `registered_serializers` merge into OpenAPI components via `raft.openapi.schema`.
-- **Router OpenAPI kwargs (`raft.core.router`):** `request_serializer` / `response_serializer` aliases for `request_body` / `responses` when declaring routes.
+
+### Removed
+
+- **`raft.serialization`:** removed legacy custom `Serializer` module (`Serializer`, `StrField`, `IntField`, `validate_body`, etc.). Standardized 100% on **Pydantic (`pydantic.BaseModel`)** for request validation, output schemas, and OpenAPI docs. Added CLI scaffold prompt for Pydantic.
+- **GraphQL:** removed Strawberry GraphQL integration (`raft/graphql`), the `raft init` GraphQL prompt/scaffold, GraphQL `raft check` steps, and the `strawberry-graphql` dependency.
+- **Jinja2 / template engine:** unused `jinja2` dependency removed; no template-engine integration is planned as a built-in for now. Docs no longer describe RaftSQL as SQLAlchemy-based.
 
 ### Changed
 
-- **`raft.core.response.RaftResponse` envelope:** `errors` appears only when `status` is false and at least one non-empty error string exists (after trimming); never on success, including `RaftResponse.custom`. OpenAPI built-in `RaftResponse` schema marks `errors` optional and `required: ["status", "message"]`.
+- **Routing module consolidation:** `route()` / `include()`, Django-style tables, and project-wide discovery live in `raft.core.router` (former `urls.py` / `route_discovery.py` removed).
+- **`raft.core.response.Response` envelope:** `errors` appears only when `status` is false and at least one non-empty error string exists (after trimming); never on success, including `Response.custom`. OpenAPI built-in `Response` schema marks `errors` optional and `required: ["status", "message"]`.
 - **`raft.openapi.schema`:** Pydantic `model_json_schema()` output is sanitized before merge into `components/schemas` so internal `raft_*` keys do not appear in Swagger.
 - **`raft.security.headers`:** documented that doc pages may set their own `Content-Security-Policy` first; middleware uses `setdefault` and does not overwrite it.
 - **`raft init` / scaffold:** no longer writes `bootstrap.structure.json`; Celery prompt removed and `celery` omitted from generated `pyproject.toml`; generated REST `app.py` relies on route autodiscovery instead of manually `include_router` for `routes/home.py`; generated README adjustments.
-- **`raft init` / scaffold:** no longer creates a `schemas/` package or `schemas/user.py`. New projects get `serializers/user.py` with `CreateUserSerializer` and `UpdateUserSerializer` (Raft `Serializer` + field helpers) and a `serializers/__init__.py` that re-exports them.
+- **`raft init` / scaffold:** no longer creates a `schemas/` or `serializers/` package. New projects get `routes/` + `views/` (and optional feature dirs).
+- **`raft init` / scaffold:** minimal layout — no sample `routes/home.py`, `routes/users.py`, or `models/user.py`. Generated `app.py` is setup-only (no sample `@app.route`). When ORM is enabled, empty `models/__init__.py` plus `setraft.py`.
+- **`raft check`:** implemented in `raft/cli/project_checks.py` (PostgreSQL TCP when `setraft` uses PostgreSQL, raftsql import, WebSocket/scheduler starters, route counts, and `pytest -q` unless `--no-tests`). `raft init` no longer writes `raft_check.py`.
 
 ### Fixed
 
@@ -33,7 +58,7 @@ Framework = `raft/` package, `raft` CLI, and `raft init` scaffold output (not th
 
 ### Breaking
 
-- **Serialization class API:** class-level `Serializer.to_representation` / `to_representation_many` were replaced by `Serializer.serialize` / `serialize_many` (Python cannot expose both a classmethod and instance method under the same name as before). Update call sites accordingly.
+- **Serializers / validation helpers removed:** `raft.Serializer`, `raft.serialization.*`, `validate_body` / `validate_query`, and related route kwargs / settings are gone. Use `await request.json()` and OpenAPI `request_body` until the new serializer layer lands.
 
 ## [0.0.1-alpha.2] - 2026-03-09
 
@@ -107,7 +132,7 @@ Framework = `raft/` package, `raft` CLI, and `raft init` scaffold output (not th
 
 - `Raft` ASGI application class that composes routing, middleware, sessions, and error handling.
 - `RaftRequest` wrapper exposing `method`, `path`, `headers`, `query_params`, `path_params`, `body()`, `json()`, `form()`, and `session`.
-- `RaftResponse` structured JSON envelope (`status / message / data / errors`) with shortcuts `ok()`, `created()`, `bad_request()`, `not_found()`, `server_error()`, and more.
+- `Response` structured JSON envelope (`status / message / data / errors`) with shortcuts `ok()`, `created()`, `bad_request()`, `not_found()`, `server_error()`, and more.
 - `RawResponse` for non-JSON responses such as HTML, redirects, and file downloads.
 - `Router` supporting both decorator-style (`@router.route()`) and URL-conf-style (`add_routes()`) route registration.
 - `Route` dataclass with `path`, `handler`, `methods`, `name`, `tags`, `summary`, `request_body`, and `responses` fields.
@@ -131,7 +156,7 @@ Framework = `raft/` package, `raft` CLI, and `raft init` scaffold output (not th
 - Cookie-based session transport using `itsdangerous` `URLSafeTimedSerializer` signed cookies; secret sourced from `settings.SECRET_KEY`.
 - `request.session` dict-like interface for reading and writing session data across requests.
 - `RaftSettings` singleton that reads `DEBUG`, `SECRET_KEY`, `ALLOWED_HOSTS`, `CORS_ORIGINS`, `SESSION_TTL`, `SESSION_COOKIE_NAME`, and `LOG_LEVEL` from environment variables or a `.env` file via `python-decouple`.
-- `HTTPException` base exception class carrying `status_code`, `message`, and `errors`; automatically serialised to the `RaftResponse` envelope.
+- `HTTPException` base exception class carrying `status_code`, `message`, and `errors`; automatically serialised to the `Response` envelope.
 - `BadRequest (400)`, `Unauthorized (401)`, `Forbidden (403)`, `NotFound (404)`, `MethodNotAllowed (405)`, `ValidationError (422)`, and `InternalServerError (500)` exception subclasses.
 - Global exception handler converting unhandled `HTTPException` instances to structured JSON; uncaught Python exceptions yield `500`.
 - `GraphQLRouter` that mounts a [Strawberry](https://strawberry.rocks/) `Schema` onto a `Router` at a configurable path (default `/graphql`); supports `POST` execution and `GET` GraphiQL IDE when `DEBUG=True`.

@@ -485,12 +485,10 @@ source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "itsdangerous" },
-    { name = "jinja2" },
     { name = "pydantic" },
     { name = "python-decouple" },
     { name = "python-multipart" },
     { name = "rich" },
-    { name = "strawberry-graphql" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchfiles" },
 ]
@@ -504,21 +502,23 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "asyncpg", marker = "extra == 'orm'", specifier = ">=0.29.0" },
     { name = "click", specifier = ">=8.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "itsdangerous", specifier = ">=2.1" },
-    { name = "jinja2", specifier = ">=3.1" },
+    { name = "psycopg2-binary", marker = "extra == 'orm'", specifier = ">=2.9.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-decouple", specifier = ">=3.8" },
+    { name = "python-dotenv", marker = "extra == 'orm'", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "raftsql", marker = "extra == 'orm'", specifier = ">=1.0.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
-    { name = "strawberry-graphql", specifier = ">=0.230.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
     { name = "watchfiles", specifier = ">=0.21" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "orm"]
 
 [[package]]
 name = "rich"

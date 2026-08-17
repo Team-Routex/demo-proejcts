@@ -13,7 +13,7 @@ Key capabilities:
 - Header access
 - Cookie access
 - JSON body parsing
-- Form / multipart file upload handling
+- Form / multipart file upload handling (via ``python-multipart``)
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 from http.cookies import SimpleCookie
 from typing import Any
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs
 
 from pydantic import BaseModel
 
@@ -77,6 +77,8 @@ class RaftRequest:
         self.path_params: dict[str, str] = scope.get("path_params", {})
         self.state: dict[str, Any] = {}  # Middleware / view scratch space.
         self.session: dict[str, Any] = {}  # Populated by session middleware.
+        self.user: Any = None  # Populated by JWT auth / authentication classes.
+        self.auth: Any = None  # Raw credentials (e.g. JWT string) when authenticated.
 
     # ---- Basic properties ------------------------------------------------
 
@@ -174,16 +176,7 @@ class RaftRequest:
         return self._json
 
     async def form(self) -> dict[str, Any]:
-        """Parse URL-encoded or multipart form data.
-
-        Returns:
-            Dict mapping field names to string values.
-
-        Note:
-            This is a simplified multipart parser suitable for prototyping.
-            For production, a library like ``python-multipart`` should be
-            integrated for robust boundary handling.
-        """
+        """Parse URL-encoded or multipart form data using ``python-multipart``."""
         if self._form is not None:
             return self._form
 
@@ -223,75 +216,53 @@ class RaftRequest:
 
 
 # ---------------------------------------------------------------------------
-# Internal multipart helpers (prototype-level)
+# Multipart parsing (python-multipart)
 # ---------------------------------------------------------------------------
 
 def _parse_multipart(
     raw: bytes, content_type: str
 ) -> tuple[dict[str, Any], dict[str, UploadedFile]]:
-    """Minimal multipart/form-data parser.
+    """Parse multipart/form-data with python-multipart."""
+    from python_multipart.multipart import FormParser, parse_options_header
 
-    WARNING — prototype only:
-        This handles simple cases.  For production use, integrate a battle-tested
-        multipart library (python-multipart).
-    """
     fields: dict[str, Any] = {}
     files: dict[str, UploadedFile] = {}
 
-    # Extract boundary
-    boundary = ""
-    for part in content_type.split(";"):
-        part = part.strip()
-        if part.startswith("boundary="):
-            boundary = part.split("=", 1)[1].strip('"')
-            break
-
-    if not boundary:
+    _, params = parse_options_header(content_type.encode("latin-1"))
+    boundary = params.get(b"boundary")
+    if boundary is None:
         return fields, files
 
-    boundary_bytes = f"--{boundary}".encode()
-    parts = raw.split(boundary_bytes)
-
-    for part in parts:
-        if not part or part.strip() == b"--" or part.strip() == b"":
-            continue
-
-        # Split headers from body
-        if b"\r\n\r\n" in part:
-            header_section, body = part.split(b"\r\n\r\n", 1)
-        elif b"\n\n" in part:
-            header_section, body = part.split(b"\n\n", 1)
+    def on_field(field: Any) -> None:
+        name = field.field_name.decode("utf-8", errors="replace")
+        value = field.value.decode("utf-8", errors="replace")
+        if name in fields:
+            existing = fields[name]
+            if isinstance(existing, list):
+                existing.append(value)
+            else:
+                fields[name] = [existing, value]
         else:
-            continue
+            fields[name] = value
 
-        # Strip trailing \r\n
-        body = body.rstrip(b"\r\n-")
+    def on_file(file: Any) -> None:
+        name = file.field_name.decode("utf-8", errors="replace")
+        filename = (file.file_name or b"upload").decode("utf-8", errors="replace")
+        file.file_object.seek(0)
+        body = file.file_object.read()
+        ct = "application/octet-stream"
+        files[name] = UploadedFile(
+            filename=filename,
+            content_type=ct,
+            body=body,
+        )
 
-        headers_text = header_section.decode("utf-8", errors="replace")
-        name = _extract_header_param(headers_text, "name")
-        filename = _extract_header_param(headers_text, "filename")
-
-        if not name:
-            continue
-
-        if filename is not None:
-            ct = "application/octet-stream"
-            for line in headers_text.splitlines():
-                if line.lower().startswith("content-type:"):
-                    ct = line.split(":", 1)[1].strip()
-            files[name] = UploadedFile(filename=filename, content_type=ct, body=body)
-        else:
-            fields[name] = body.decode("utf-8", errors="replace")
-
+    parser = FormParser(
+        "multipart/form-data",
+        on_field,
+        on_file,
+        boundary=boundary,
+    )
+    parser.write(raw)
+    parser.close()
     return fields, files
-
-
-def _extract_header_param(headers: str, param: str) -> str | None:
-    """Pull a ``param="value"`` from Content-Disposition or similar."""
-    token = f'{param}="'
-    idx = headers.find(token)
-    if idx == -1:
-        return None
-    start = idx + len(token)
-    end = headers.index('"', start)
-    return unquote(headers[start:end])

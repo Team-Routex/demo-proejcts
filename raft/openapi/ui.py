@@ -2,29 +2,24 @@
 raft.openapi.ui
 ~~~~~~~~~~~~~~~
 
-HTML page generators for Swagger UI and ReDoc.
-
-Both pages load assets from a public CDN so no extra Python packages are
-needed — only a browser and internet access (or a local CDN mirror for
-air-gapped environments).
+HTML page generators for Swagger UI and ReDoc (CDN assets).
 """
 
 from __future__ import annotations
 
+import html as html_lib
+
 
 def swagger_ui_html(openapi_url: str, title: str) -> str:
-    """Return a complete Swagger UI HTML page.
-
-    Parameters:
-        openapi_url: URL path to the ``/openapi.json`` endpoint.
-        title: Page title shown in the browser tab.
-    """
+    """Return a complete Swagger UI HTML page."""
+    safe_title = html_lib.escape(title)
+    safe_url = html_lib.escape(openapi_url, quote=True)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title} — Swagger UI</title>
+    <title>{safe_title} — Swagger UI</title>
     <link rel="stylesheet" type="text/css"
           href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css">
     <style>
@@ -44,7 +39,7 @@ def swagger_ui_html(openapi_url: str, title: str) -> str:
     <script>
         window.onload = function () {{
             window.ui = SwaggerUIBundle({{
-                url: "{openapi_url}",
+                url: "{safe_url}",
                 dom_id: "#swagger-ui",
                 presets: [
                     SwaggerUIBundle.presets.apis,
@@ -57,6 +52,11 @@ def swagger_ui_html(openapi_url: str, title: str) -> str:
                 showCommonExtensions: true,
                 defaultModelsExpandDepth: 2,
                 defaultModelExpandDepth: 2,
+                withCredentials: true,
+                requestInterceptor: function (req) {{
+                    req.credentials = "same-origin";
+                    return req;
+                }},
             }});
         }};
     </script>
@@ -65,28 +65,25 @@ def swagger_ui_html(openapi_url: str, title: str) -> str:
 
 
 def redoc_html(openapi_url: str, title: str) -> str:
-    """Return a complete ReDoc HTML page.
-
-    Parameters:
-        openapi_url: URL path to the ``/openapi.json`` endpoint.
-        title: Page title shown in the browser tab.
-    """
+    """Return a complete ReDoc HTML page."""
+    safe_title = html_lib.escape(title)
+    safe_url = html_lib.escape(openapi_url, quote=True)
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title} — ReDoc</title>
+    <title>{safe_title} — ReDoc</title>
     <style>
         body {{ margin: 0; padding: 0; }}
     </style>
 </head>
 <body>
-    <redoc spec-url="{openapi_url}"
+    <redoc spec-url="{safe_url}"
            expand-responses="200,201"
            hide-download-button="false">
     </redoc>
-    <script src="https://cdn.jsdelivr.net/npm/redoc@latest/bundles/redoc.standalone.js">
+    <script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js">
     </script>
 </body>
 </html>"""

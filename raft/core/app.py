@@ -9,13 +9,13 @@ and response serialization into a single ASGI-compatible application.
 
 Minimal usage::
 
-    from raft import Raft, RaftResponse
+    from raft import Raft, Response
 
     app = Raft()
 
-    @app.route("/", methods=["GET"])
+    @app.get("/")
     async def index(request):
-        return RaftResponse.ok(message="Welcome to Raft!")
+        return Response.success(message="Welcome to Raft!")
 
 Running::
 
@@ -28,6 +28,7 @@ Running::
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import inspect
 import logging
@@ -40,11 +41,13 @@ from pydantic import ValidationError as PydanticValidationError
 from raft.config.settings import settings
 from raft.core.exceptions import HTTPException, ValidationError
 from raft.core.request import RaftRequest
-from raft.core.response import RaftResponse, RawResponse
+from raft.core.response import Response, RawResponse
 from raft.core.router import Route, Router, ViewCallable
+from raft.core.type_enforcement import bind_and_call_handler, check_routes_with_mypy
 from raft.middleware.base import MiddlewareFunc, MiddlewarePipeline
 from raft.middleware.cors import cors_middleware
 from raft.middleware.csrf import csrf_middleware
+from raft.middleware.rate_limit import rate_limit_middleware
 from raft.middleware.sqli import sqli_middleware
 from raft.middleware.xss import xss_middleware
 from raft.security.headers import security_headers_middleware
@@ -73,8 +76,6 @@ class Raft:
         enable_sqli: Attach SQLi scanning middleware (default True).
         auto_discover_routes: Load ``router`` from each module under the routes
             directory (default from ``RAFT_AUTO_DISCOVER_ROUTES``).
-        auto_discover_serializers: Load ``Serializer`` subclasses from the
-            serializers package (default from ``RAFT_AUTO_DISCOVER_SERIALIZERS``).
     """
 
     def __init__(
@@ -88,8 +89,8 @@ class Raft:
         enable_security_headers: bool = True,
         enable_xss: bool = True,
         enable_sqli: bool = True,
+        enable_rate_limit: bool | None = None,
         auto_discover_routes: bool | None = None,
-        auto_discover_serializers: bool | None = None,
     ) -> None:
         self.debug: bool = debug if debug is not None else settings.DEBUG
         self.router: Router = Router()
@@ -117,6 +118,13 @@ class Raft:
             self._pipeline.add(xss_middleware)
         if enable_sqli:
             self._pipeline.add(sqli_middleware)
+        should_rate_limit = (
+            settings.RATE_LIMIT_ENABLED
+            if enable_rate_limit is None
+            else enable_rate_limit
+        )
+        if should_rate_limit:
+            self._pipeline.add(rate_limit_middleware)
 
         should_discover_tasks = (
             settings.AUTO_DISCOVER_TASKS
@@ -142,13 +150,9 @@ class Raft:
         if should_discover_routes:
             self.autodiscover_routes()
 
-        should_discover_serializers = (
-            settings.AUTO_DISCOVER_SERIALIZERS
-            if auto_discover_serializers is None
-            else auto_discover_serializers
-        )
-        if should_discover_serializers:
-            self.autodiscover_serializers()
+    def typecheck_routes(self) -> tuple[str, str, int]:
+        """Run Mypy static analysis on all registered route handler files."""
+        return check_routes_with_mypy(self.router.routes)
 
     # ---- Route registration shortcuts ------------------------------------
 
@@ -161,10 +165,10 @@ class Raft:
         summary: str | None = None,
         request_body: type | None = None,
         responses: dict[int, Any] | None = None,
-        request_serializer: type | None = None,
-        response_serializer: type | None = None,
+        authentication_classes: list[Any] | None = None,
+        permission_classes: list[Any] | None = None,
     ) -> Callable[[ViewCallable], ViewCallable]:
-        """Decorator shortcut for ``self.router.route(...)``."""
+        """Low-level multi-method decorator. Prefer ``@app.get`` / ``@app.post``."""
         self._chain = None  # invalidate cached chain
         return self.router.route(
             path,
@@ -174,17 +178,52 @@ class Raft:
             summary=summary,
             request_body=request_body,
             responses=responses,
-            request_serializer=request_serializer,
-            response_serializer=response_serializer,
+            authentication_classes=authentication_classes,
+            permission_classes=permission_classes,
         )
+
+    def get(self, path: str, **kwargs: Any) -> Callable[[ViewCallable], ViewCallable]:
+        """Register a GET handler: ``@app.get("/items")``."""
+        self._chain = None
+        return self.router.get(path, **kwargs)
+
+    def post(self, path: str, **kwargs: Any) -> Callable[[ViewCallable], ViewCallable]:
+        """Register a POST handler: ``@app.post("/items")``."""
+        self._chain = None
+        return self.router.post(path, **kwargs)
+
+    def put(self, path: str, **kwargs: Any) -> Callable[[ViewCallable], ViewCallable]:
+        """Register a PUT handler: ``@app.put("/items/{id}")``."""
+        self._chain = None
+        return self.router.put(path, **kwargs)
+
+    def patch(self, path: str, **kwargs: Any) -> Callable[[ViewCallable], ViewCallable]:
+        """Register a PATCH handler: ``@app.patch("/items/{id}")``."""
+        self._chain = None
+        return self.router.patch(path, **kwargs)
+
+    def delete(self, path: str, **kwargs: Any) -> Callable[[ViewCallable], ViewCallable]:
+        """Register a DELETE handler: ``@app.delete("/items/{id}")``."""
+        self._chain = None
+        return self.router.delete(path, **kwargs)
+
+    def head(self, path: str, **kwargs: Any) -> Callable[[ViewCallable], ViewCallable]:
+        """Register a HEAD handler: ``@app.head("/items")``."""
+        self._chain = None
+        return self.router.head(path, **kwargs)
+
+    def options(self, path: str, **kwargs: Any) -> Callable[[ViewCallable], ViewCallable]:
+        """Register an OPTIONS handler: ``@app.options("/items")``."""
+        self._chain = None
+        return self.router.options(path, **kwargs)
 
     def add_route(self, route: Route) -> None:
         """Register a Route object directly."""
         self._chain = None
         self.router.add_route(route)
 
-    def add_routes(self, routes: list[Route]) -> None:
-        """Register multiple ``Route`` objects at once (URL-conf list style)."""
+    def add_routes(self, routes: list[Any]) -> None:
+        """Register ``Route`` objects or a Django-style ``routes`` table."""
         self._chain = None
         self.router.add_routes(routes)
 
@@ -197,41 +236,67 @@ class Raft:
         self,
         directory: str | Path | None = None,
     ) -> int:
-        """Load ``Router`` instances from a project ``routes`` directory.
+        """Discover hybrid route definitions anywhere under the project.
 
-        Discovery rules:
-            - Scans ``<cwd>/<directory>/*.py`` excluding ``__init__.py`` and
-              private modules (``_*``).
-            - If a module defines ``ROUTERS`` (list/tuple of ``Router``), each
-              is merged.
-            - Otherwise, if the module defines ``router`` as a ``Router``,
-              it is merged.
+        Walks ``BASE_DIR`` (or *directory* when given) for modules that export:
+
+            - ``ROUTERS`` — list/tuple of ``Router`` instances
+            - ``router`` — a single ``Router`` (method-decorator style)
+            - ``routes`` — Django-style ``route()`` / ``include()`` table
+
+        Files do **not** need to live under ``routes/``. Private modules,
+        tests, venvs, and the framework package itself are skipped.
 
         Environment:
-            ``RAFT_AUTO_DISCOVER_ROUTES``, ``RAFT_ROUTES_DIR`` (see settings).
+            ``RAFT_AUTO_DISCOVER_ROUTES`` (see settings).
+            ``RAFT_ROUTES_DIR`` — if set and *directory* is omitted, still used
+            only when ``RAFT_ROUTES_SCAN`` is ``dir`` (folder-only). Default
+            scan mode is project-wide (``RAFT_ROUTES_SCAN=project``).
         """
-        routes_dir_name = directory or settings.ROUTES_MODULE_DIR
-        base_dir = settings.BASE_DIR if isinstance(settings.BASE_DIR, Path) else Path.cwd()
-        routes_dir = base_dir / str(routes_dir_name)
+        from raft.core.router import iter_route_module_files
 
-        if not routes_dir.exists() or not routes_dir.is_dir():
-            return 0
+        base_dir = settings.BASE_DIR if isinstance(settings.BASE_DIR, Path) else Path.cwd()
+        base_dir = Path(base_dir)
+
+        only_under: Path | None = None
+        if directory is not None:
+            only_under = Path(directory)
+            if not only_under.is_absolute():
+                only_under = base_dir / only_under
+        elif getattr(settings, "ROUTES_SCAN", "project") == "dir":
+            only_under = base_dir / str(settings.ROUTES_MODULE_DIR)
 
         loaded = 0
-        for file_path in sorted(routes_dir.glob("*.py")):
-            if file_path.name.startswith("_") or file_path.name == "__init__.py":
-                continue
-
+        for file_path in iter_route_module_files(base_dir, only_under=only_under):
             module = self._load_module_from_path(
                 file_path, namespace="routes", log_label="routes"
             )
             if module is None:
                 continue
 
-            for subrouter in self._extract_routers(module):
-                self.include_router(subrouter)
+            rel = file_path.name
+            try:
+                rel = str(file_path.resolve().relative_to(base_dir.resolve()))
+            except ValueError:
+                pass
+
+            routers = self._extract_routers(module)
+            if routers:
+                for subrouter in routers:
+                    self.include_router(subrouter)
+                    loaded += 1
+                    logger.info(
+                        "New router detected: %s (%s)",
+                        subrouter.prefix or "/",
+                        rel,
+                    )
+                continue
+
+            table = getattr(module, "routes", None)
+            if isinstance(table, (list, tuple)) and table:
+                self.add_routes(list(table))
                 loaded += 1
-                logger.info("New router detected: %s (%s)", subrouter.prefix or "/", file_path.name)
+                logger.info("New routes table detected: %s", rel)
 
         return loaded
 
@@ -248,53 +313,6 @@ class Raft:
             return [router]
 
         return []
-
-    def autodiscover_serializers(
-        self,
-        directory: str | Path | None = None,
-    ) -> int:
-        """Register ``Serializer`` subclasses from a project ``serializers`` folder.
-
-        Scans ``*.py`` (skips ``__init__.py`` and ``_*``). Each defined subclass
-        of :class:`raft.serialization.base.Serializer` is registered for OpenAPI
-        components and introspection.
-
-        Environment: ``RAFT_AUTO_DISCOVER_SERIALIZERS``, ``RAFT_SERIALIZERS_DIR``.
-        """
-        from raft.serialization.base import Serializer
-        from raft.serialization.registry import register_serializer
-
-        serializers_dir_name = directory or settings.SERIALIZERS_MODULE_DIR
-        base_dir = settings.BASE_DIR if isinstance(settings.BASE_DIR, Path) else Path.cwd()
-        ser_dir = base_dir / str(serializers_dir_name)
-
-        if not ser_dir.exists() or not ser_dir.is_dir():
-            return 0
-
-        loaded = 0
-        for file_path in sorted(ser_dir.glob("*.py")):
-            if file_path.name.startswith("_") or file_path.name == "__init__.py":
-                continue
-
-            module = self._load_module_from_path(
-                file_path, namespace="serializers", log_label="serializers"
-            )
-            if module is None:
-                continue
-
-            mod_name = module.__name__
-            for _name, obj in inspect.getmembers(module):
-                if not isinstance(obj, type):
-                    continue
-                if getattr(obj, "__module__", None) != mod_name:
-                    continue
-                if not issubclass(obj, Serializer) or obj is Serializer:
-                    continue
-                register_serializer(obj)
-                loaded += 1
-                logger.info("Serializer registered: %s (%s)", obj.__name__, file_path.name)
-
-        return loaded
 
     def websocket(
         self,
@@ -361,7 +379,8 @@ class Raft:
         *,
         log_label: str = "middleware",
     ) -> Any | None:
-        module_name = f"raft_user_{namespace}_{file_path.stem}_{abs(hash(str(file_path)))}"
+        path_hash = hashlib.md5(str(file_path.resolve()).encode("utf-8")).hexdigest()[:8]
+        module_name = f"raft_user_{namespace}_{file_path.stem}_{path_hash}"
         spec = importlib.util.spec_from_file_location(module_name, file_path)
         if spec is None or spec.loader is None:
             return None
@@ -602,7 +621,7 @@ class Raft:
 
             response = await self._chain(request)
         except HTTPException as exc:
-            response = RaftResponse._build(
+            response = Response.build(
                 status=False,
                 message=exc.message,
                 errors=exc.errors,
@@ -613,7 +632,7 @@ class Raft:
                 f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
                 for e in exc.errors()
             ]
-            response = RaftResponse.unprocessable(
+            response = Response.unprocessable(
                 message="Validation Error", errors=errors
             )
         except Exception as exc:
@@ -621,7 +640,7 @@ class Raft:
             msg = str(exc) if self.debug else "Internal Server Error"
             tb = traceback.format_exc() if self.debug else None
             errors = [tb] if tb else []
-            response = RaftResponse.internal_error(message=msg, errors=errors)
+            response = Response.internal_error(message=msg, errors=errors)
 
         await response.send(send)
 
@@ -634,16 +653,20 @@ class Raft:
         if result is None:
             # Distinguish 404 from 405.
             if self.router.resolve_path_only(request.path):
-                return RaftResponse.method_not_allowed(
+                return Response.method_not_allowed(
                     message=f"Method {request.method} not allowed for {request.path}"
                 )
-            return RaftResponse.not_found(
+            from raft.core.welcome import should_show_welcome, welcome_response
+
+            if should_show_welcome(debug=self.debug, route_count=len(self.router.routes)):
+                return welcome_response()
+            return Response.not_found(
                 message=f"No route matches {request.path}"
             )
 
         route, path_params = result
         request.path_params = path_params
-        return await route.handler(request)
+        return await bind_and_call_handler(route.handler, request, path_params)
 
     async def _dispatch_websocket(
         self,

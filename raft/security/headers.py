@@ -19,10 +19,8 @@ OpenAPI / Swagger / ReDoc HTML responses set their own ``Content-Security-Policy
 header so CDN scripts (unpkg, jsDelivr) and small inline bootstrappers work;
 ``setdefault`` here does not override an existing policy.
 
-PROTOTYPE NOTE:
-    The default CSP here is ``default-src 'self'`` for normal JSON/HTML pages.
-    Production applications should craft a strict CSP tailored to their
-    asset domains and inline-script needs.
+Production applications should craft a strict CSP tailored to their asset domains.
+See ``DEPLOYMENT.md`` for HTTPS, HSTS, and proxy configuration.
 """
 
 from __future__ import annotations

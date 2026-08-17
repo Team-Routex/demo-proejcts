@@ -35,9 +35,9 @@ async def request_id_middleware(request, call_next):
 
                 @app.route("/", methods=["GET"])
                 async def index(request):
-                    from raft import RaftResponse
+                    from raft import Response
 
-                    return RaftResponse.ok(message="ok")
+                    return Response.success(message="ok")
 
                 async def run_request() -> list[tuple[bytes, bytes]]:
                     sent: list[dict] = []

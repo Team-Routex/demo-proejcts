@@ -29,7 +29,7 @@ _SQLI_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"\b(or|and)\b\s+\d+\s*=\s*\d+", re.IGNORECASE),
     re.compile(r"'\s*or\s*'1'\s*=\s*'1", re.IGNORECASE),
     re.compile(r"\bexec(ute)?\b\s+(xp_|sp_)", re.IGNORECASE),
-    re.compile(r"(--|#|/\*)", re.IGNORECASE),
+    re.compile(r"(--\s|/\*)", re.IGNORECASE),
     re.compile(r";\s*(drop|alter|truncate|insert|delete|update)\b", re.IGNORECASE),
 ]
 

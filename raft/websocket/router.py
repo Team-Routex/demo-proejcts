@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
+from raft.core.router import path_resolution_candidates
 from raft.websocket.connection import RaftWebSocket
 
 WebSocketHandler = Callable[[RaftWebSocket], Awaitable[None]]
@@ -66,10 +67,11 @@ class WebSocketRouter:
 
     def resolve(self, path: str) -> tuple[WebSocketRoute, dict[str, str]] | None:
         """Resolve websocket path to a route and extracted path params."""
-        for route in self._routes:
-            match = route._pattern.match(path)
-            if match is not None:
-                return route, match.groupdict()
+        for candidate in path_resolution_candidates(path):
+            for route in self._routes:
+                match = route._pattern.match(candidate)
+                if match is not None:
+                    return route, match.groupdict()
         return None
 
     @property

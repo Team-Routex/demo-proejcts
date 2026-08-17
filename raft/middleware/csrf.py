@@ -66,17 +66,13 @@ async def csrf_middleware(request: RaftRequest, call_next: CallNext) -> RawRespo
 
 
 async def _get_request_csrf_token(request: RaftRequest) -> str | None:
-    """Extract CSRF token from header, cookie, or form payload."""
+    """Extract CSRF token from header or form payload (never from Cookie header)."""
     header_token = request.get_header("x-csrf-token") or request.get_header("x-xsrf-token")
     if header_token:
         return header_token
 
-    cookie_token = request.get_cookie(_CSRF_COOKIE_NAME)
-    if cookie_token:
-        return cookie_token
-
     # Fallback for form submissions.
-    content_type = request.get_header("content-type", "")
+    content_type = request.get_header("content-type", "") or ""
     if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
         form_data = await request.form()
         return form_data.get("csrf_token")

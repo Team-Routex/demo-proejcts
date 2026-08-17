@@ -17,14 +17,14 @@ class RoutesAutodiscoveryTests(unittest.TestCase):
             (routes_dir / "__init__.py").write_text("", encoding="utf-8")
             (routes_dir / "items.py").write_text(
                 """
-from raft import RaftResponse, Router
+from raft import Response, Router
 
 router = Router(prefix="/items")
 
 
-@router.route("/", methods=["GET"])
+@router.get("/")
 async def list_items(request):
-    return RaftResponse.ok(message="items", data=[])
+    return Response.success(message="items", data=[])
 """.strip(),
                 encoding="utf-8",
             )

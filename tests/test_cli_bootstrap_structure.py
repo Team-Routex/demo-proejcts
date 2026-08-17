@@ -12,8 +12,8 @@ class CliBootstrapStructureTests(unittest.TestCase):
             _scaffold_project(
                 base,
                 project_name="minimal_project",
+                use_pydantic=False,
                 use_openapi=True,
-                api_style="r",
                 use_orm=False,
                 use_scheduler=False,
                 use_websocket=False,
@@ -22,9 +22,16 @@ class CliBootstrapStructureTests(unittest.TestCase):
             )
 
             self.assertTrue((base / "routes").exists())
+            routes_init = (base / "routes" / "__init__.py").read_text(encoding="utf-8")
+            self.assertIn("anywhere", routes_init.lower())
+            app_content = (base / "app.py").read_text(encoding="utf-8")
+            self.assertIn("auto-discovered", app_content)
+            self.assertNotIn("app.add_routes", app_content)
             self.assertFalse((base / "schemas").exists())
-            self.assertTrue((base / "serializers").exists())
-            self.assertTrue((base / "serializers" / "user.py").exists())
+            self.assertFalse((base / "serializers").exists())
+            self.assertTrue((base / "commands").exists())
+            self.assertTrue((base / "commands" / "hello.py").exists())
+            self.assertFalse((base / "routes" / "home.py").exists())
             self.assertFalse((base / "tasks").exists())
             self.assertFalse((base / "ws").exists())
             self.assertFalse((base / "graphql_schema").exists())
@@ -32,6 +39,7 @@ class CliBootstrapStructureTests(unittest.TestCase):
             self.assertFalse((base / "models").exists())
             self.assertFalse((base / "setraft.py").exists())
             self.assertFalse((base / "bootstrap.structure.json").exists())
+            self.assertFalse((base / "raft_check.py").exists())
 
             pyproject_content = (base / "pyproject.toml").read_text(encoding="utf-8")
             self.assertNotIn("sqlalchemy", pyproject_content)
@@ -39,6 +47,13 @@ class CliBootstrapStructureTests(unittest.TestCase):
 
             app_content = (base / "app.py").read_text(encoding="utf-8")
             self.assertNotIn("raftsql.setup()", app_content)
+            self.assertNotIn("@app.route", app_content)
+            self.assertIn("OpenAPIRouter", app_content)
+            self.assertIn("app.include_router(openapi.router)", app_content)
+
+            # ORM-only artifacts must NOT exist in the minimal scaffold
+            self.assertFalse((base / "routes" / "users.py").exists())
+            self.assertFalse((base / "models").exists())
 
     def test_full_bootstrap_includes_selected_feature_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -47,7 +62,6 @@ class CliBootstrapStructureTests(unittest.TestCase):
                 base,
                 project_name="full_project",
                 use_openapi=True,
-                api_style="g",
                 use_orm=True,
                 use_scheduler=True,
                 use_websocket=True,
@@ -57,12 +71,14 @@ class CliBootstrapStructureTests(unittest.TestCase):
 
             self.assertTrue((base / "tasks").exists())
             self.assertTrue((base / "ws").exists())
-            self.assertTrue((base / "graphql_schema").exists())
+            self.assertFalse((base / "graphql_schema").exists())
             self.assertTrue((base / "models").exists())
-            self.assertTrue((base / "models" / "user.py").exists())
+            self.assertFalse((base / "models" / "user.py").exists())
+            self.assertTrue((base / "models" / "__init__.py").exists())
             self.assertTrue((base / "setraft.py").exists())
             self.assertTrue((base / "middleware").exists())
             self.assertFalse((base / "bootstrap.structure.json").exists())
+            self.assertFalse((base / "raft_check.py").exists())
 
             pyproject_content = (base / "pyproject.toml").read_text(encoding="utf-8")
             self.assertIn("raftsql", pyproject_content)
@@ -72,6 +88,14 @@ class CliBootstrapStructureTests(unittest.TestCase):
 
             app_content = (base / "app.py").read_text(encoding="utf-8")
             self.assertIn("raftsql.setup()", app_content)
+            self.assertIn("OpenAPIRouter", app_content)
+            self.assertNotIn("@app.route", app_content)
+
+            self.assertFalse((base / "routes" / "users.py").exists())
+            self.assertFalse((base / "routes" / "home.py").exists())
+
+            models_init = (base / "models" / "__init__.py").read_text(encoding="utf-8")
+            self.assertIn("__all__", models_init)
 
 
 if __name__ == "__main__":

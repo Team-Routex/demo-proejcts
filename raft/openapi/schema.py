@@ -24,7 +24,6 @@ from typing import Any
 from pydantic import BaseModel
 
 from raft.core.router import Route, Router
-from raft.serialization.registry import registered_serializers
 
 # ---------------------------------------------------------------------------
 # JSON Schema → OpenAPI (strip framework-only keys from Pydantic output)
@@ -119,7 +118,7 @@ def build_openapi_schema(
     """
     exclude = exclude_paths or set()
     paths: dict[str, Any] = {}
-    components_schemas: dict[str, Any] = {"RaftResponse": _RAFT_RESPONSE_SCHEMA}
+    components_schemas: dict[str, Any] = {"Response": _RAFT_RESPONSE_SCHEMA}
 
     for route in router.routes:
         if route.path in exclude:
@@ -153,8 +152,6 @@ def build_openapi_schema(
             )
             paths[openapi_path][method.lower()] = operation
 
-    _merge_registered_serializer_schemas(components_schemas)
-
     schema: dict[str, Any] = {
         "openapi": "3.0.3",
         "info": {
@@ -177,21 +174,6 @@ def build_openapi_schema(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _merge_registered_serializer_schemas(components_schemas: dict[str, Any]) -> None:
-    """Add autodiscovered serializer models so Swagger lists reusable schemas."""
-    for cls in registered_serializers().values():
-        if not isinstance(cls, type) or not issubclass(cls, BaseModel):
-            continue
-        schema_name = cls.__name__
-        if schema_name in components_schemas:
-            continue
-        model_schema, defs = _pydantic_model_openapi_schema(cls)
-        for k, v in defs.items():
-            if k not in components_schemas:
-                components_schemas[k] = v
-        components_schemas[schema_name] = model_schema
-
 
 def _build_operation(
     route: Route,
@@ -223,8 +205,9 @@ def _build_operation(
         op["parameters"] = path_parameters
 
     # Request body (only meaningful for mutating methods)
-    if route.request_body and method.upper() in ("POST", "PUT", "PATCH"):
-        _add_request_body(op, route.request_body, components_schemas)
+    body_model = route.request_body
+    if body_model and method.upper() in ("POST", "PUT", "PATCH"):
+        _add_request_body(op, body_model, components_schemas)
 
     # Responses
     op["responses"] = _build_responses(route, components_schemas)
@@ -238,17 +221,17 @@ def _add_request_body(
     components_schemas: dict[str, Any],
 ) -> None:
     """Inject requestBody into *op* and register the model in components."""
-    if not (isinstance(model, type) and issubclass(model, BaseModel)):
+    if not isinstance(model, type):
         return
 
-    schema_name = model.__name__
-    model_schema, defs = _pydantic_model_openapi_schema(model)
-
-    # Hoist Pydantic $defs (nested model schemas) into components
-    for k, v in defs.items():
-        components_schemas[k] = v
-
-    components_schemas[schema_name] = model_schema
+    if issubclass(model, BaseModel):
+        schema_name = model.__name__
+        model_schema, defs = _pydantic_model_openapi_schema(model)
+        for k, v in defs.items():
+            components_schemas[k] = v
+        components_schemas[schema_name] = model_schema
+    else:
+        return
 
     op["requestBody"] = {
         "required": True,
@@ -272,23 +255,27 @@ def _build_responses(
             code_str = str(status_code)
 
             if isinstance(value, str):
-                # String → description + RaftResponse envelope reference
+                # String → description + Response envelope reference
                 result[code_str] = {
                     "description": value,
                     "content": {
                         "application/json": {
-                            "schema": {"$ref": "#/components/schemas/RaftResponse"}
+                            "schema": {"$ref": "#/components/schemas/Response"}
                         }
                     },
                 }
 
-            elif isinstance(value, type) and issubclass(value, BaseModel):
-                # Pydantic model → register + reference
+            elif isinstance(value, type) and (
+                issubclass(value, BaseModel) or is_serializer_type(value)
+            ):
                 schema_name = value.__name__
-                model_schema, defs = _pydantic_model_openapi_schema(value)
-                for k, v in defs.items():
-                    components_schemas[k] = v
-                components_schemas[schema_name] = model_schema
+                if is_serializer_type(value):
+                    components_schemas[schema_name] = value.json_schema(write=False)
+                else:
+                    model_schema, defs = _pydantic_model_openapi_schema(value)
+                    for k, v in defs.items():
+                        components_schemas[k] = v
+                    components_schemas[schema_name] = model_schema
 
                 result[code_str] = {
                     "description": "Success",
@@ -307,7 +294,7 @@ def _build_responses(
             "description": "Success",
             "content": {
                 "application/json": {
-                    "schema": {"$ref": "#/components/schemas/RaftResponse"}
+                    "schema": {"$ref": "#/components/schemas/Response"}
                 }
             },
         }
@@ -323,7 +310,7 @@ def _build_responses(
                 "description": desc,
                 "content": {
                     "application/json": {
-                        "schema": {"$ref": "#/components/schemas/RaftResponse"}
+                        "schema": {"$ref": "#/components/schemas/Response"}
                     }
                 },
             }

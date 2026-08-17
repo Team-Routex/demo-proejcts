@@ -2,7 +2,11 @@
 
 **A Python web framework with hybrid routing, built on ASGI.**
 
-Raft is a prototype web framework that combines a structured, batteries-included developer experience with modern async Python, Pydantic validation, and a hybrid routing system that supports both decorator and URL-conf styles.
+Raft is a **production-ready when configured correctly** Python web framework that combines a structured, batteries-included developer experience with modern async Python and a hybrid routing system that supports both decorator and URL-conf styles.
+
+> See **[DEPLOYMENT.md](DEPLOYMENT.md)** for workers, Redis, secrets, OpenAPI, HSTS, and rate limiting.
+>
+> **Full documentation site:** open **[docs/index.html](docs/index.html)** in your browser (HTML/CSS/JS — no build step).
 
 ---
 
@@ -14,7 +18,7 @@ Raft Framework aims to be a **beginner-friendly, production-aware** Python web f
 - **Modern Python** — async/await everywhere, type hints, Pydantic v2
 - **ASGI-native** — built for uvicorn, supports async middleware pipelines
 - **Hybrid routing** — use decorators (Flask-style) or centralized URL lists (URL-conf), or mix both
-- **Batteries included** — sessions, security headers, CORS, CSRF, Pydantic validation, optional serializers + OpenAPI, optional GraphQL, task scheduling, WebSocket routes
+- **Batteries included** — sessions (memory or Redis), JWT auth, security headers, CORS, CSRF, OpenAPI, task scheduling, WebSocket routes
 - **CLI scaffolding** — `raft init` creates projects interactively
 - **UV-compatible** — works seamlessly with the `uv` package manager
 
@@ -37,8 +41,9 @@ raft-framework/
 │   │   ├── __init__.py
 │   │   ├── app.py              # Raft ASGI application class
 │   │   ├── request.py          # RaftRequest wrapper
-│   │   ├── response.py         # RaftResponse + RawResponse
-│   │   ├── router.py           # Router + Route + path compilation
+│   │   ├── response.py         # Response + RawResponse
+│   │   ├── router.py           # Router, Route, route()/include(), discovery
+│   │   ├── type_enforcement.py # Dual-runtime type engine (HTTP coercion + Mypy analyzer)
 │   │   ├── views.py            # Class-based view (CBV) base
 │   │   └── exceptions.py       # HTTPException hierarchy
 │   │
@@ -56,21 +61,16 @@ raft-framework/
 │   │
 │   ├── session/                # Session management
 │   │   ├── __init__.py
-│   │   └── backend.py          # In-memory session store + middleware
+│   │   ├── backend.py          # Session middleware + memory/redis store selection
+│   │   └── redis_store.py      # Redis-backed session store
 │   │
-│   ├── validation/             # Pydantic validation helpers
+│   ├── redis/                  # Optional Redis client helpers
 │   │   ├── __init__.py
-│   │   └── validator.py        # validate_body, validate_query
+│   │   └── client.py
 │   │
-│   ├── serialization/          # Serializer base + field helpers + registry
+│   ├── auth/                   # JWT access tokens + @require_auth
 │   │   ├── __init__.py
-│   │   ├── base.py             # Serializer, validation_error, hooks
-│   │   ├── fields.py           # IntegerField, CharField, EmailField, BooleanField
-│   │   └── registry.py         # register_serializer, autodiscovery merge → OpenAPI
-│   │
-│   ├── graphql/                # GraphQL integration
-│   │   ├── __init__.py
-│   │   └── integration.py      # GraphQLRouter (Strawberry)
+│   │   └── jwt.py
 │   │
 │   ├── openapi/                # OpenAPI schema + Swagger/ReDoc
 │   │   ├── __init__.py
@@ -88,7 +88,10 @@ raft-framework/
 │   │
 │   ├── cli/                    # CLI tool
 │   │   ├── __init__.py
-│   │   └── main.py             # Click commands (init, runserver, check)
+│   │   ├── main.py             # Click commands (init, runserver, check, version)
+│   │   ├── ui.py               # Figlet banner + Rich panels/tables
+│   │   ├── scaffold.py         # Project scaffolding templates
+│   │   └── project_checks.py   # ``raft check`` internals
 │   │
 │   ├── tasks/                  # Background scheduler
 │   │   ├── __init__.py
@@ -105,7 +108,7 @@ raft-framework/
 │
 └── examples/                   # Sample apps (not part of the installed package)
     ├── app.py                  # Broad feature tour
-    └── todo_demo/              # REST + serializers + OpenAPI (see its README)
+    └── todo_demo/              # REST + OpenAPI (see its README)
 
 tests/                          # Unit tests
 ```
@@ -119,14 +122,14 @@ tests/                          # Unit tests
 | `raft/core/` | The heart of the framework: ASGI app, request/response wrappers, routing engine, views, and exceptions. Everything here is imported by user code. |
 | `raft/middleware/` | Middleware pipeline infrastructure and built-in security middleware (CORS, CSRF, XSS, SQLi). |
 | `middleware/` (project app folder) | Your custom middleware modules. Raft auto-detects async callables ending in `_middleware` (or a `MIDDLEWARE = [...]` export) at startup. |
-| `raft/security/` | Security-specific utilities — currently security response headers. Future: rate limiting, authentication helpers. |
-| `raft/session/` | Server-side session management with signed cookie transport. Future: Redis/DB backends. |
-| `raft/validation/` | Pydantic-powered request validation. `validate_body()` and `validate_query()` work with any `BaseModel`, including `Serializer`. |
-| `raft/serialization/` | `Serializer` (Pydantic subclass) with field hooks (`validate_<field>`, `validate`), read/write field flags, `.data`, `serialize()` / `serialize_many()`, registry + autodiscovery for OpenAPI components. |
-| `raft/graphql/` | Strawberry GraphQL integration. `GraphQLRouter` mounts a schema onto the Raft router. |
+| `raft/security/` | Security-specific utilities — currently security response headers. Future: rate limiting. |
+| `raft/session/` | Server-side sessions with signed cookie transport; backends `memory` (default) or `redis`. |
+| `raft/redis/` | Built-in Redis client; configure with `RAFT_REDIS_URL` or leave unused (`get_redis`, `redis_key`). |
+| `raft/auth/` | JWT helpers (`create_access_token`, `@require_auth`) and optional `jwt_auth_middleware`. |
+| `raft/openapi/` | OpenAPI schema generation, Swagger UI, and ReDoc. |
 | `raft/config/` | Centralized settings via `python-decouple`. Reads `.env` files and provides typed access. |
 | `raft/server/` | Server runners for development (hot-reload via uvicorn `--reload`) and production. |
-| `raft/cli/` | Click-based CLI for project scaffolding (`raft init`), serving (`raft runserver`), and health checks (`raft check`). |
+| `raft/cli/` | Click + Rich + pyfiglet CLI: `raft init`, `runserver`, `check`, `version`. |
 | `raft/utils/` | Reserved for shared helper functions (encoding, logging formatters, etc.). |
 | `examples/` | Optional sample projects; install the `raft-framework` package from the repo root to run them. |
 
@@ -143,26 +146,71 @@ The `Raft` class implements the ASGI 3.0 interface (`__call__(scope, receive, se
 ### Request/Response
 - `RaftRequest` wraps the raw ASGI scope and receive callable into a clean, typed API
 - `RawResponse` is a low-level ASGI response sender
-- `RaftResponse` is a factory that produces `RawResponse` objects with the unified JSON envelope
+- `Response` is a factory that produces `RawResponse` objects with the unified JSON envelope
 
-### JSON envelope (`RaftResponse`)
+### JSON envelope (`Response`)
 Successful responses include `status`, `message`, and `data` only. The `errors` key is **omitted** when there are no errors. On failure (`status: false`), `errors` is a list of non-empty strings (field paths and messages) when present; it is still omitted if there is nothing meaningful to report.
 
 ### Middleware Pipeline
 Middleware functions follow a simple signature: `async def mw(request, call_next) -> response`. They form a chain — each middleware calls `call_next` to invoke the next layer, and can modify the request before or the response after.
 
 ### Routing
-Routes support `{param}` syntax for path parameters (compiled to named regex groups). The router supports:
-- Decorator registration (`@router.route(...)`)
-- URL-conf registration (`router.add_routes([Route(...), ...])`)
-- Router nesting (`router.include_router(sub_router)`)
+Routes support `{param}` syntax for path parameters (compiled to named regex groups). Preferred registration styles:
+- **Method decorators** — `@app.get`, `@app.post`, `@app.put`, `@app.patch`, `@app.delete` (same on `Router`)
+- **Django-style route table** — `route()` / `include()` / `routes` via `app.add_routes(...)`
+- Router nesting via `include_router`, plus low-level `@route(methods=[...])` for multi-method handlers
+
+### Starter welcome page
+When `DEBUG` is on and **no HTTP routes** are registered yet, Raft serves a branded HTML starter page for any unmatched path (instead of a JSON 404). As soon as you define a route (`@app.get`, `routes = [...]`, etc.), that page no longer appears.
+
+### Circuit breaker (outbound resilience)
+Protect calls to other services (monolith externals or microservice peers)::
+
+```python
+from raft import CircuitBreaker, CircuitOpenError, Response
+
+payments = CircuitBreaker("payments", failure_threshold=5, recovery_timeout=30)
+
+@payments
+async def charge(amount: float):
+    # outbound HTTP / RPC
+    ...
+
+@app.get("/checkout")
+async def checkout(request):
+    try:
+        await charge(9.99)
+    except CircuitOpenError:
+        return Response.custom(
+            status=False, message="Payments unavailable", http_status=503
+        )
+    return Response.success(message="charged")
+```
+
+Shared named breakers: `get_circuit("payments")`.
 
 ### Autodiscovery (`Raft` startup)
-Besides optional `middleware/` scanning, `Raft()` can load **`routes/`** modules that export `router` or `ROUTERS`, and register **`Serializer`** subclasses from **`serializers/`**. Toggle with `RAFT_AUTO_DISCOVER_ROUTES`, `RAFT_AUTO_DISCOVER_SERIALIZERS`, or the matching `Raft(..., auto_discover_routes=..., auto_discover_serializers=...)` arguments. Paths default to `BASE_DIR` from settings (typically the project root).
+`Raft()` discovers hybrid HTTP routes **anywhere under the project root** (not only `routes/`): modules that export a **`routes`** table (`route()` / `include()`) or a **`router` / `ROUTERS`**. Tests, venvs, and the framework package itself are skipped. Set `RAFT_ROUTES_SCAN=dir` to limit discovery to `RAFT_ROUTES_DIR` (default `routes`). Toggle with `RAFT_AUTO_DISCOVER_ROUTES` / `Raft(auto_discover_routes=False)`.
+
+```python
+# api/users.py  (any folder — auto-loaded)
+from raft import route, Response
+
+async def list_users(request):
+    return Response.success(data=[])
+
+routes = [
+    route("/users/", list_users, methods=["GET"]),
+]
+
+# app.py
+from raft import Raft
+app = Raft()  # discovers api/users.py — no add_routes()
+```
 
 ### How Raft handles a request (overview)
 
-At runtime the ASGI server calls `Raft.__call__`. **HTTP** traffic goes through the middleware pipeline, then the router, then your view; **WebSocket** and **lifespan** messages branch to their own handlers. Exceptions raised while running the HTTP chain are converted to a JSON `RaftResponse` before `send`.
+At runtime the ASGI server calls `Raft.__call__`. **HTTP** traffic goes through the middleware pipeline, then the router, then your view; **WebSocket** and **lifespan** messages branch to their own handlers. Exceptions raised while running the HTTP chain are converted to a JSON `Response` before `send`.
 
 ```mermaid
 flowchart TB
@@ -184,7 +232,7 @@ flowchart TB
     RQ --> MW[Middleware pipeline]
     MW --> DP["_dispatch: router.resolve path and method"]
     DP --> MT{Matched route?}
-    MT -->|no| NA[404 or 405 RaftResponse]
+    MT -->|no| NA[404 or 405 Response]
     MT -->|yes| VH[Call async view or CBV method]
     VH --> RR[RawResponse]
     NA --> OUT[Return through middleware]
@@ -222,13 +270,31 @@ sequenceDiagram
 
 ## 5. Type System Explanation
 
+Raft features **Dual-Runtime Type Enforcement ("Raft TypeShield")**, combining **Static Code Type Analysis via Mypy** and **Runtime HTTP Parameter Validation & Coercion**.
+
+### A. Dual-Runtime Pillars
+
+1. **Runtime HTTP Parameter Enforcement (`raft.core.type_enforcement`)**:
+   - **Annotated Parameters (Strict)**: Automatically coerces incoming path variables, query string parameters, and JSON body keys to target Python types (`int`, `float`, `bool`, `str`, `bytes`, `uuid.UUID`, `datetime`, `date`, `time`, Pydantic `BaseModel`). Invalid types or missing required values automatically return **HTTP 422 Unprocessable Entity**.
+   - **Unannotated Parameters (Lax)**: Received raw without triggering type conversion or 422 errors.
+   - **Request Injection**: `request: RaftRequest` is automatically injected into handler functions.
+
+2. **Static Mypy Analysis (`raft check` / `app.typecheck_routes()`)**:
+   - Uses `mypy.api.run` to analyze registered route source files and project code on demand or at startup.
+
+### B. Parameter Resolution Order
+When a view handler declares a parameter `x: int`, Raft resolves it in this order:
+1. **Path Variable** (from URL template `/items/{x}`)
+2. **Query String** (from `?x=42`)
+3. **JSON / Form Body** (from `{"x": 42}`)
+
 ### Key Types
 
 | Type | Where Used | What It Means |
 |---|---|---|
 | `RaftRequest` | View function first argument | Wraps ASGI scope; provides `.method`, `.path`, `.headers`, `.cookies`, `.query_params`, `.path_params`, `.session`, `.body()`, `.json()`, `.form()`, `.files()` |
 | `RawResponse` | Return type of all views | Low-level response with `.body`, `.status_code`, `.headers`, `.set_cookie()`, `.send()` |
-| `RaftResponse` | Static factory class | Class methods like `.ok()`, `.created()`, `.bad_request()` return `RawResponse` instances with the unified JSON envelope |
+| `Response` | Static factory class | Class methods like `.success()`, `.error()`, `.created()`, `.bad_request()` return `RawResponse` instances with the unified JSON envelope; subclass for custom envelopes |
 | `ViewCallable` | `Callable[[RaftRequest], Awaitable[RawResponse]]` | Type alias for async view functions |
 | `CallNext` | `Callable[[RaftRequest], Awaitable[RawResponse]]` | Middleware's "next handler" callback |
 | `MiddlewareFunc` | `Callable[[RaftRequest, CallNext], Awaitable[RawResponse]]` | Signature every middleware must follow |
@@ -236,19 +302,19 @@ sequenceDiagram
 | `Router` | Class | Collects routes, resolves paths, supports nesting |
 | `View` | Base class for CBVs | Override `get()`, `post()`, etc.; register via `View.as_view()` |
 | `UploadedFile` | Property of parsed multipart | `.filename`, `.content_type`, `.body`, `.size`, `.save(path)` |
-| `BaseModel` subclasses | Pydantic validation | Used with `validate_body(request, MyModel)` |
-| `Serializer` | Request/response shaping + OpenAPI | Subclass of `BaseModel` with `IntegerField`, `CharField`, etc.; use `Serializer(data=...)` for input, `instance=...` for output, `.validated_data`, `.data`, `serialize()` / `serialize_many()` |
+| `BaseModel` subclasses | OpenAPI / typing / body validation | Pass to route or view parameters for automatic JSON body validation |
 
 ### What Users Pass vs. Get Back
 
 | Function | User Passes | User Gets |
 |---|---|---|
 | `@app.route("/path")` | Path string, method list | Decorator that registers the function |
-| View function | `request: RaftRequest` | `RawResponse` (via `RaftResponse.ok(...)` etc.) |
-| `validate_body(request, Model)` | Request + Pydantic model class | Validated model instance (or raises `ValidationError`) |
+| View function | `request: RaftRequest, id: int` | `RawResponse` (with `id` coerced to `int`) |
 | `request.json()` | — (awaited) | Parsed Python dict/list |
 | `request.files()` | — (awaited) | `dict[str, UploadedFile]` |
-| `RaftResponse.ok(data={...})` | Message string + data dict | `RawResponse` with `{"status": true, "message": "...", "data": {...}}` (no `errors` key on success) |
+| `Response.success(data={...})` | Message string + data dict | `RawResponse` with `{"status": true, "message": "...", "data": {...}}` (no `errors` key on success) |
+| `app.typecheck_routes()` | — | `(stdout, stderr, exit_status)` from Mypy analysis |
+
 
 ---
 
@@ -256,21 +322,25 @@ sequenceDiagram
 
 ### Simple REST Route (FBV)
 ```python
-from raft import Raft, RaftResponse
+from raft import Raft, Response
 
 app = Raft()
 
-@app.route("/hello", methods=["GET"])
+@app.get("/hello")
 async def hello(request):
-    return RaftResponse.ok(message="Hello, World!")
+    return Response.success(message="Hello, World!")
+
+@app.post("/hello")
+async def hello_post(request):
+    return Response.created(message="Created")
 ```
 
 ### Path Parameters
 ```python
-@app.route("/users/{user_id}", methods=["GET"])
+@app.get("/users/{user_id}")
 async def get_user(request):
     user_id = request.path_params["user_id"]
-    return RaftResponse.ok(data={"id": user_id})
+    return Response.success(data={"id": user_id})
 ```
 
 ### Class-Based View (CBV)
@@ -280,11 +350,11 @@ from raft.core.router import Route
 
 class ItemView(View):
     async def get(self, request):
-        return RaftResponse.ok(data={"item": "Widget"})
+        return Response.success(data={"item": "Widget"})
 
     async def post(self, request):
         body = await request.json()
-        return RaftResponse.created(data=body)
+        return Response.created(data=body)
 
 app.add_route(Route("/items", ItemView))
 ```
@@ -300,7 +370,7 @@ app.add_route(Route("/items", ItemView.as_view()))
 ```python
 @app.route("/info", methods=["GET"])
 async def info(request):
-    return RaftResponse.ok(data={
+    return Response.success(data={
         "q": request.get_query_param("q"),
         "accept": request.get_header("accept"),
         "session_cookie": request.get_cookie("raft_session"),
@@ -316,7 +386,7 @@ async def upload(request):
     files = await request.files()
     for name, f in files.items():
         f.save(f"/tmp/{f.filename}")
-    return RaftResponse.ok(message=f"{len(files)} file(s) saved")
+    return Response.success(message=f"{len(files)} file(s) saved")
 ```
 
 ### Session Read/Write
@@ -325,75 +395,43 @@ async def upload(request):
 async def set_session(request):
     body = await request.json()
     request.session["username"] = body["username"]
-    return RaftResponse.ok(message="Session updated")
+    return Response.success(message="Session updated")
 
 @app.route("/session/get", methods=["GET"])
 async def get_session(request):
     username = request.session.get("username", "anonymous")
-    return RaftResponse.ok(data={"username": username})
+    return Response.success(data={"username": username})
 ```
 
-### Pydantic Validation
+Parse JSON yourself (`await request.json()`), validate with **Serializers**, or use Pydantic models with OpenAPI `request_body=` / `responses=`.
+
+### Serializers (input/output validation)
+Django-style serializers without the `Raft` prefix:
+
 ```python
-from pydantic import BaseModel
-from raft.validation.validator import validate_body
+from raft import Serializer, StrField, IntField, EmailField, validate_body, Response
 
-class CreateUser(BaseModel):
-    name: str
-    email: str
-    age: int | None = None
+class UserIn(Serializer):
+    username = StrField(min_length=1, max_length=50)
+    age = IntField(min_value=0, required=False, default=18)
 
-@app.route("/users", methods=["POST"])
+    def validate_username(self, value: str) -> str:
+        return value.lower()
+
+class UserOut(Serializer):
+    id = IntField(read_only=True)
+    username = StrField(read_only=True)
+
+@app.post("/users/", request_serializer=UserIn, response_serializer=UserOut)
 async def create_user(request):
-    user = await validate_body(request, CreateUser)
-    return RaftResponse.created(data=user.model_dump())
+    payload = await validate_body(request, UserIn)
+    user = {"id": 1, **payload.validated_data}
+    return Response.success(data=UserOut.serialize(user))
 ```
 
-Invalid input automatically returns a JSON body with `status: false`, a message, and an `errors` list when there are field-level messages.
+Helpers: `validate_body`, `validate_query`, `validate_form`. Field hooks: `validate_<field>` and `validate()`. Stack Click options on project commands, not serializers.
 
-### Serializers (optional)
-
-`Serializer` extends Pydantic with field helpers, read/write flags, and validation hooks. Use it with `validate_body` like any model, or wire it per route for OpenAPI request bodies. Projects created with `raft init` include a starter `serializers/user.py` you can rename or replace.
-
-```python
-from raft import Serializer, validation_error
-from raft.serialization import IntegerField, CharField
-
-class TodoCreate(Serializer):
-    title = CharField(max_length=200)
-    priority = IntegerField(default=1, ge=1, le=5)
-
-    def validate_title(self, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise validation_error("title", "cannot be blank")
-        return value
-
-    def validate(self, attrs: dict) -> dict:
-        return attrs
-```
-
-- **Input:** `TodoCreate(data=payload)` then `.model_validate()` (or `await validate_body(request, TodoCreate)`).
-- **Output:** `TodoCreate(instance=obj).data` or `TodoCreate.serialize(obj)` / `TodoCreate.serialize_many(items)`.
-- **OpenAPI:** call `register_serializer(TodoCreate)` or add a project `serializers/` package (enabled by default via `RAFT_AUTO_DISCOVER_SERIALIZERS` / `auto_discover_serializers` on `Raft`). On routes, pass `request_serializer=` / `response_serializer=` (aliases for `request_body` / default 200 response schema) so `/openapi.json` includes components.
-
-Published OpenAPI schemas strip internal `raft_*` keys used for documentation metadata.
-
-### GraphQL
-```python
-import strawberry
-from raft.graphql.integration import GraphQLRouter
-
-@strawberry.type
-class Query:
-    @strawberry.field
-    def hello(self) -> str:
-        return "Hello from GraphQL!"
-
-schema = strawberry.Schema(Query)
-gql = GraphQLRouter(schema, path="/graphql")
-app.include_router(gql.router)
-```
+Read/write flags: `read_only=True` (output only), `write_only=True` (input only).
 
 ### Custom Middleware
 ```python
@@ -426,22 +464,37 @@ async def request_id_middleware(request, call_next):
     return response
 ```
 
-### Centralized URL patterns (URL-conf)
+### Centralized route table (Django-style)
 ```python
-from raft import Router, Route
+from raft import route, include
+
+routes = [
+    route("/users/", list_users, methods=["GET"], name="user-list"),
+    route("/users/{id}/", get_user, methods=["GET"], name="user-detail"),
+    route("/users/", create_user, methods=["POST"], name="user-create"),
+    route("/api/", include([
+        route("/items/", list_items, methods=["GET"]),
+    ])),
+]
+app.add_routes(routes)
+```
+
+Or keep a `Router` with method decorators and mount it:
+
+```python
+from raft import Router
 
 api = Router(prefix="/api/v1")
-api.add_routes([
-    Route("/users", list_users, methods=["GET"]),
-    Route("/users/{id}", get_user, methods=["GET"]),
-    Route("/users", create_user, methods=["POST"]),
-])
+
+@api.get("/users")
+async def list_users(request): ...
+
 app.include_router(api)
 ```
 
-### Swagger UI / API Docs (Public or Private)
+### Swagger UI / API Docs
 ```python
-from raft.openapi.router import OpenAPIRouter
+from raft.openapi import OpenAPIRouter
 
 openapi = OpenAPIRouter(
     app,
@@ -452,23 +505,22 @@ openapi = OpenAPIRouter(
 app.include_router(openapi.router)
 ```
 
-Docs endpoints:
-- `GET /openapi.json`
-- `GET /docs` (Swagger UI)
-- `GET /redoc` (ReDoc)
+Endpoints: `/openapi.json`, `/docs` (Swagger UI), `/redoc`.
 
-Swagger UI and ReDoc need third-party scripts; the HTML responses from `OpenAPIRouter` apply a **relaxed Content-Security-Policy** for those paths only, so they work together with the default strict `security_headers_middleware` elsewhere.
-
-To protect docs with a password in `.env`:
+**Protect with HTTP Basic** (static username + password):
 ```env
-RAFT_OPENAPI_DOCS_VISIBILITY=private
+RAFT_OPENAPI_DOCS_ENABLED=true
+RAFT_OPENAPI_DOCS_USERNAME=docs
 RAFT_OPENAPI_DOCS_PASSWORD=my-docs-password
 ```
 
-In `public` mode, no password is required:
+**Disable in production** (returns 404 for all three endpoints):
 ```env
-RAFT_OPENAPI_DOCS_VISIBILITY=public
+RAFT_OPENAPI_DOCS_ENABLED=false
+# or: RAFT_OPENAPI_DOCS_VISIBILITY=disabled
 ```
+
+`private` visibility also requires credentials (defaults username to `admin` if unset). Doc HTML uses a relaxed CSP so Swagger/ReDoc CDN assets load correctly.
 
 ### Task Scheduler (Celery-like Easy Usage)
 ```python
@@ -499,7 +551,7 @@ from tasks.periodic import build_welcome_message
 @app.route("/welcome/{name}", methods=["GET"])
 async def welcome(request):
     name = request.path_params["name"]
-    return RaftResponse.ok(data={"message": build_welcome_message(name)})
+    return Response.success(data={"message": build_welcome_message(name)})
 ```
 
 Set `repeat=False` to run only once.
@@ -532,33 +584,52 @@ This is intentionally lightweight: no separate consumer classes or channel layer
 
 ---
 
-## 7. CLI Prototype
+## 7. CLI
+
+Figlet banner + Rich panels (Click commands).
+
+### `raft` / `raft version`
+Shows the RAFT ASCII banner and version.
 
 ### `raft init`
 ```bash
 $ raft init myproject
-
-╭─────────────────────────────────────────╮
-│ Raft Framework — New Project Setup      │
-│ Project: myproject                       │
-╰─────────────────────────────────────────╯
-    Enable OpenAPI / Docs? [y/N]: n
-    Use GraphQL? [y/N]: n
-  Use ORM (RaftSql)? [y/N]: n
-    Use built-in Task Scheduler (auto-detect tasks folder)? [y/N]: y
-    Create custom middleware starter file? [y/N]: y
-  Use WebSocket? [y/N]: n
-    Use .env file? [y/N]: n
-
-✔ Project myproject created at /path/to/myproject
-  cd myproject
-  uv sync              # install deps
-  raft runserver       # start dev server
+# Interactive prompts → feature summary table → scaffold
 ```
 
-If `Use GraphQL?` is `No`, the scaffold stays REST-only (no `graphql_schema/` and no `strawberry-graphql` dependency).
+Every new project includes `app.py`, empty `routes/`, `views/`, and `commands/` (with a sample `hello.py`). **`raft init` does not create a `schemas/` or `serializers/` folder**. Optional dirs: `tasks/`, `ws/`, `middleware/`, `models/` (+ `setraft.py`). Generated `.env` gets a random `RAFT_SECRET_KEY`.
 
-Every new project includes `app.py`, `routes/` (with `home.py`), `views/`, and **`serializers/`** with a starter `serializers/user.py` (`CreateUserSerializer`, `UpdateUserSerializer`) and `serializers/__init__.py` exports. **`raft init` does not create a `schemas/` folder**—put request/response types in `serializers/` (Raft `Serializer`) or define plain Pydantic `BaseModel` classes alongside your code if you prefer. Optional directories are added when you enable the matching prompts: `tasks/`, `ws/`, `middleware/`, `models/` (ORM), and `graphql_schema/` (GraphQL).
+### `raft run`
+Django-style project scripts from a `commands/` folder (configurable via `RAFT_COMMANDS_DIR`):
+
+```python
+# commands/seed.py
+from raft.commands import command
+
+@command(help="Seed demo data")
+def seed():
+    print("Seeding...")
+```
+
+```bash
+$ raft run              # list commands
+$ raft run seed         # run seed
+$ raft run hello        # sample from raft init
+```
+
+Stack Click options **below** `@command`:
+
+```python
+import click
+from raft.commands import command
+
+@command(help="Rebuild cache")
+@click.option("--force", is_flag=True)
+def rebuild_cache(force: bool):
+    ...
+```
+
+Async commands are supported (`async def`).
 
 ### `raft runserver`
 ```bash
@@ -576,20 +647,10 @@ $ raft runserver --app myapp.main:app
 ```
 
 ### `raft check`
+Runs **inside the CLI** (no generated `raft_check.py`). From your project root it verifies layout, `app`/`main` import, `RAFT_SECRET_KEY`, core dependencies, optional **PostgreSQL** reachability when `setraft.py` uses PostgreSQL, **raftsql** import when the ORM is configured, **WebSocket** / **scheduler** starter modules when those folders exist, a **Raft route summary** (HTTP + WebSocket route counts), and finally **`python -m pytest -q --tb=line`** (skipped with a hint if `pytest` is not installed; use **`raft check --no-tests`** to skip the test run).
+
 ```bash
 $ raft check
-
-╭────────────────────╮
-│ Raft Config Checker │
-╰────────────────────╯
-  ✔ .env file
-  ✔ App entry point (app.py)
-  ✘ SECRET_KEY is set
-      Set RAFT_SECRET_KEY in .env
-  ✔ Core dependencies
-  ✔ pyproject.toml
-
-Some checks failed — see hints above.
 ```
 
 ---
@@ -600,14 +661,27 @@ Some checks failed — see hints above.
 Create a `.env` in your project root:
 ```env
 RAFT_DEBUG=true
-RAFT_SECRET_KEY=my-super-secret-random-key
+RAFT_SECRET_KEY=my-super-secret-random-key-at-least-32-bytes
 RAFT_HOST=127.0.0.1
 RAFT_PORT=8000
 RAFT_ALLOWED_HOSTS=*
 RAFT_CORS_ALLOWED_ORIGINS=http://localhost:3000,https://myapp.com
 RAFT_LOG_LEVEL=info
+RAFT_OPENAPI_DOCS_ENABLED=true
 RAFT_OPENAPI_DOCS_VISIBILITY=public
-RAFT_OPENAPI_DOCS_PASSWORD=
+# RAFT_OPENAPI_DOCS_USERNAME=docs
+# RAFT_OPENAPI_DOCS_PASSWORD=
+
+# Sessions + Redis (optional)
+RAFT_SESSION_BACKEND=memory
+# RAFT_SESSION_BACKEND=redis
+# RAFT_REDIS_URL=redis://localhost:6379/0
+# RAFT_REDIS_PREFIX=raft:
+
+# JWT (PyJWT is a core dependency)
+# RAFT_JWT_SECRET=  # defaults to RAFT_SECRET_KEY when empty
+RAFT_JWT_ALGORITHM=HS256
+RAFT_JWT_EXPIRE_MINUTES=60
 ```
 
 Access in code:
@@ -617,7 +691,84 @@ from raft.config.settings import settings
 print(settings.DEBUG)           # bool
 print(settings.SECRET_KEY)      # str
 print(settings.ALLOWED_HOSTS)   # list[str]
+print(settings.SESSION_BACKEND) # "memory" | "redis"
 ```
+
+### Redis (built-in, config-only)
+
+The ``redis`` package is included with Raft. Leave config empty to ignore it; set a URL when you want a client or Redis sessions:
+
+```env
+RAFT_REDIS_URL=redis://localhost:6379/0
+RAFT_REDIS_PREFIX=raft:
+RAFT_SESSION_BACKEND=redis
+```
+
+```python
+from raft import get_redis, redis_configured
+
+if redis_configured():
+    get_redis().ping()
+```
+
+### JWT authentication
+
+**Method decorators** (``@app.get`` / ``@app.post`` / ``@router.get``):
+
+```python
+@app.get(
+    "/me",
+    authentication_classes=[JWTAuthentication],
+    permission_classes=[IsAuthenticated],
+)
+async def me(request):
+    return Response.success(data={"user": request.user})
+
+@app.post("/login")
+async def login(request):
+    token = create_access_token({"sub": "user-1", "role": "admin"})
+    return Response.success(data={"access_token": token, "token_type": "bearer"})
+```
+
+**Class-based views** — preferred with `route()` tables:
+
+```python
+from raft import View, route, Response, create_access_token
+from raft.auth import JWTAuthentication, IsAuthenticated
+
+class MeView(View):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    async def get(self, request):
+        return Response.success(data={"user": request.user})
+
+routes = [
+    route("/login/", login, methods=["POST"]),
+    route("/me/", MeView, methods=["GET"]),
+    # Or protect an FBV from the table:
+    # route("/me/", me, methods=["GET"],
+    #       authentication_classes=[JWTAuthentication],
+    #       permission_classes=[IsAuthenticated]),
+]
+```
+
+**Function views** — same classes via decorators:
+
+```python
+from raft.auth import authentication_classes, permission_classes, JWTAuthentication, IsAuthenticated
+
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+async def me(request):
+    return Response.success(data={"user": request.user})
+
+routes = [route("/me/", me, methods=["GET"])]
+```
+
+**Shortcut** for simple FBVs: `@require_auth()`. Optional app-wide claim attachment: `app.add_middleware(jwt_auth_middleware)` (does not reject missing tokens).
+
+Send `Authorization: Bearer <token>`. Claims land on `request.user`; raw token on `request.auth`.
 
 ### Development Mode
 ```bash
@@ -696,30 +847,30 @@ uv sync --locked
 | **Security Headers** | ✅ Included | X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, CSP, HSTS (prod) |
 | **CORS** | ✅ Included | Configurable origins, methods, headers; preflight handling |
 | **CSRF** | ✅ Included | Synchronizer token pattern via session + header/form field |
-| **XSS Scanning** | ⚠️ Prototype | Scans inputs for `<script>`, `javascript:`, `on*=` patterns. NOT a replacement for output encoding |
-| **SQLi Scanning** | ⚠️ Prototype | Scans inputs for `UNION SELECT`, `DROP TABLE`, etc. NOT a replacement for parameterised queries |
-| **Session Security** | ✅ Included | Signed cookies (itsdangerous), httponly, samesite=Lax |
-| **Input Validation** | ✅ Included | Pydantic v2 validation with structured error responses |
+| **Multipart uploads** | ✅ Included | Parsed with `python-multipart` via `request.form()` / `request.files()` |
+| **Rate limiting** | ✅ Opt-in | Middleware + Redis backend; use reverse proxy at scale (see DEPLOYMENT.md) |
+| **XSS Scanning** | ⚠️ Heuristic | Pattern scan only — use output encoding + CSP in production |
+| **SQLi Scanning** | ⚠️ Heuristic | Regex hints only — use parameterised queries / ORM |
+| **Session Security** | ✅ Included | Signed cookies, HttpOnly, SameSite; Secure when not DEBUG; memory TTL or Redis |
+| **JWT Auth** | ✅ Included | HS256 access tokens + `@require_auth`; set a long `RAFT_JWT_SECRET` / `RAFT_SECRET_KEY` |
 
-### What is Prototype-Only (Needs Hardening for Production)
+### Production hardening notes
 
-1. **XSS Middleware** — Pattern-based scanning is easily bypassed. Production apps MUST use output encoding at the template layer and a strict Content-Security-Policy.
+Raft ships production-capable sessions, JWT, security headers (including **HSTS when `DEBUG=false`**), OpenAPI doc controls, serializers, hardened multipart parsing, and optional rate limiting. You still must configure secrets, Redis for multi-worker sessions, and disable or protect docs — see **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 
-2. **SQLi Middleware** — Heuristic regex patterns catch obvious attacks but sophisticated injection bypasses them. The primary defense MUST be parameterised queries / ORM usage.
+1. **XSS / SQLi middleware** — Heuristic only. Primary defences: output encoding, parameterised SQL, strict CSP.
 
-3. **Multipart Parser** — The built-in parser handles simple cases. For production, integrate `python-multipart` for robust boundary handling and streaming.
+2. **Session store** — Use `RAFT_SESSION_BACKEND=redis` with multiple workers.
 
-4. **Session Store** — The in-memory store loses all sessions on restart and doesn't scale across processes. Use Redis or a database backend for production.
+3. **CSRF** — Enable for HTML forms; consider double-submit cookies for high-risk apps.
 
-5. **CSRF** — The current implementation uses a simple session token. Production apps should add double-submit cookies, per-form tokens with expiry, and template auto-injection.
+4. **CSP** — Tailor `Content-Security-Policy` for your asset domains.
 
-6. **CSP Header** — The default policy is strict (`default-src 'self'`). Tighten or extend it for your asset domains; if you add doc UIs outside `OpenAPIRouter`, you may need a similar per-route CSP override so inline or CDN scripts are allowed only where intended.
+5. **Secret key** — Replace `change-me-in-production` with a cryptographically random string (≥32 bytes).
 
-7. **Secret Key** — The default `change-me-in-production` must be replaced with a cryptographically random string.
+6. **Rate limiting** — Enable `RAFT_RATE_LIMIT_ENABLED=true` or configure nginx/Cloudflare limits (recommended at scale).
 
-8. **Rate Limiting** — Not included. Add a rate-limiting middleware or use a reverse proxy (nginx, Cloudflare).
-
-9. **Authentication** — Not included. Implement JWT, OAuth2, or session-based auth as needed.
+7. **Authentication** — JWT access tokens included; add refresh/OAuth as your product requires.
 
 ---
 
@@ -727,15 +878,12 @@ uv sync --locked
 
 | Feature | Priority | Description |
 |---|---|---|
-| **RaftSQL ORM** | High | SQLAlchemy-based ORM with migrations, model registry |
+| **RaftSQL ORM** | High | Deeper first-party integration with the RaftSQL package (migrations UX, model registry) |
 | **WebSocket refinements** | Medium | ASGI WebSockets and room helpers exist; channel layers, auth hooks |
-| **OpenAPI refinements** | Medium | Schema from routes + serializers shipped; deeper response models, auth schemes |
+| **OpenAPI refinements** | Medium | Deeper response models, auth schemes in Swagger |
 | **Task Queue** | Medium | Celery integration with `raft task` CLI commands |
-| **Template Engine** | Medium | Jinja2 integration with auto-escaping for HTML apps |
 | **Static Files** | Medium | Serve static files in development |
-| **Redis Sessions** | Medium | Production session backend |
-| **Rate Limiting** | Medium | Token bucket middleware |
-| **Auth Module** | Medium | JWT + session auth with user model |
+| **Auth refinements** | Medium | Refresh tokens, OAuth2, user model helpers |
 | **Testing Utilities** | Medium | `RaftTestClient` for easy async testing |
 | **Signals / Events** | Low | Event-style hooks for app lifecycle |
 | **Admin Panel** | Low | Auto-generated admin interface |
@@ -756,13 +904,13 @@ uv add raft-framework
 
 # 3. Create app.py
 cat > app.py << 'EOF'
-from raft import Raft, RaftResponse
+from raft import Raft, Response
 
 app = Raft()
 
-@app.route("/", methods=["GET"])
+@app.get("/")
 async def index(request):
-    return RaftResponse.ok(message="Hello from Raft!")
+    return Response.success(message="Hello from Raft!")
 EOF
 
 # 4. Run

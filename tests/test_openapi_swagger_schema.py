@@ -3,7 +3,7 @@ import unittest
 from pydantic import BaseModel
 
 from raft import Raft
-from raft.core.response import RaftResponse
+from raft.core.response import Response
 from raft.openapi.schema import build_openapi_schema
 
 
@@ -18,7 +18,7 @@ class OpenAPISwaggerSchemaTests(unittest.TestCase):
 
         @app.route("/users/{user_id}", methods=["GET"])
         async def get_user(request):
-            return RaftResponse.ok(data={"id": request.path_params["user_id"]})
+            return Response.success(data={"id": request.path_params["user_id"]})
 
         @app.route(
             "/users",
@@ -27,7 +27,7 @@ class OpenAPISwaggerSchemaTests(unittest.TestCase):
             responses={201: "Created"},
         )
         async def create_user(request):
-            return RaftResponse.created(data={"ok": True})
+            return Response.created(data={"ok": True})
 
         schema = build_openapi_schema(app.router, title="Test API", version="1.0.0")
 
@@ -44,13 +44,13 @@ class OpenAPISwaggerSchemaTests(unittest.TestCase):
         body_schema_ref = post_op["requestBody"]["content"]["application/json"]["schema"]["$ref"]
         self.assertEqual(body_schema_ref, "#/components/schemas/CreateUserBody")
 
-        # Response structure should reference RaftResponse envelope schema.
+        # Response structure should reference Response envelope schema.
         self.assertIn("responses", get_op)
         get_200_ref = get_op["responses"]["200"]["content"]["application/json"]["schema"]["$ref"]
-        self.assertEqual(get_200_ref, "#/components/schemas/RaftResponse")
+        self.assertEqual(get_200_ref, "#/components/schemas/Response")
 
         # Components should include both Raft envelope and request model schema.
-        self.assertIn("RaftResponse", schema["components"]["schemas"])
+        self.assertIn("Response", schema["components"]["schemas"])
         self.assertIn("CreateUserBody", schema["components"]["schemas"])
 
 
