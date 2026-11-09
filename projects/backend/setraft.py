@@ -15,7 +15,7 @@ DATABASE = {
 }
 
 MEDIA_ROOT = str(BASE_DIR / "uploads")
-MEDIA_URL = "/media/"
+MEDIA_URL = "/uploads/"
 
 APPS = ["models"]
 

@@ -30,41 +30,48 @@ from raft.core.router import Route, Router
 # ---------------------------------------------------------------------------
 
 
-def _strip_internal_json_schema_keys(obj: Any) -> Any:
-    """Drop ``raft_*`` entries so Swagger/OpenAPI only show standard JSON Schema."""
+def _normalize_openapi_refs_and_keys(obj: Any) -> Any:
+    """Drop ``raft_*`` entries and convert ``#/$defs/`` references to ``#/components/schemas/``."""
     if isinstance(obj, dict):
-        return {
-            str(k): _strip_internal_json_schema_keys(v)
-            for k, v in obj.items()
-            if not (isinstance(k, str) and k.startswith("raft_"))
-        }
+        result: dict[str, Any] = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and k.startswith("raft_"):
+                continue
+            if k == "$ref" and isinstance(v, str) and "#/$defs/" in v:
+                result["$ref"] = v.replace("#/$defs/", "#/components/schemas/")
+            else:
+                result[str(k)] = _normalize_openapi_refs_and_keys(v)
+        return result
     if isinstance(obj, list):
-        return [_strip_internal_json_schema_keys(x) for x in obj]
+        return [_normalize_openapi_refs_and_keys(x) for x in obj]
     return obj
 
 
 def _pydantic_model_openapi_schema(
     model: type[BaseModel],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """``model_json_schema()`` root and ``$defs``, with internal ``raft_*`` keys stripped."""
-    raw = model.model_json_schema()
+    """``model_json_schema()`` root and ``$defs``, with OpenAPI 3.0 compatible component refs."""
+    try:
+        raw = model.model_json_schema(ref_template="#/components/schemas/{model}")
+    except TypeError:
+        raw = model.model_json_schema()
     defs = raw.pop("$defs", {})
-    cleaned_defs = {k: _strip_internal_json_schema_keys(v) for k, v in defs.items()}
-    root = _strip_internal_json_schema_keys(raw)
+    cleaned_defs = {k: _normalize_openapi_refs_and_keys(v) for k, v in defs.items()}
+    root = _normalize_openapi_refs_and_keys(raw)
     return root, cleaned_defs
 
 
 # ---------------------------------------------------------------------------
-# Built-in Raft envelope schema component (reused for all default responses)
+# Built-in Raft envelope schema components (Success and distinct Error schemas)
 # ---------------------------------------------------------------------------
 
 _RAFT_RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "description": "Standard Raft Framework response envelope",
+    "description": "Standard Raft Framework success response envelope",
     "properties": {
         "status": {
             "type": "boolean",
-            "description": "True on success, False on error",
+            "description": "True on success",
             "example": True,
         },
         "message": {
@@ -73,20 +80,141 @@ _RAFT_RESPONSE_SCHEMA: dict[str, Any] = {
             "example": "Success",
         },
         "data": {
-            "description": "Response payload (object, array, or null)",
+            "description": "Response payload (object, array, primitive, or null)",
             "nullable": True,
+        },
+    },
+    "required": ["status", "message"],
+}
+
+_RAFT_ERROR_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Standard Raft Framework error response envelope",
+    "properties": {
+        "status": {
+            "type": "boolean",
+            "description": "False on error",
+            "example": False,
+        },
+        "message": {
+            "type": "string",
+            "description": "Human-readable error description",
+            "example": "Bad Request",
+        },
+        "data": {
+            "description": "Always null on failure",
+            "nullable": True,
+            "example": None,
         },
         "errors": {
             "type": "array",
             "items": {"type": "string"},
-            "description": (
-                "Omitted on success (status true). On failure, omitted unless there "
-                "is at least one non-empty error string."
-            ),
-            "example": ["field: invalid value"],
+            "description": "List of detailed error messages",
+            "example": ["Invalid request parameters or payload."],
         },
     },
     "required": ["status", "message"],
+}
+
+_RAFT_UNAUTHORIZED_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Standard Raft Framework authentication required error envelope",
+    "properties": {
+        "status": {
+            "type": "boolean",
+            "description": "False on authentication failure",
+            "example": False,
+        },
+        "message": {
+            "type": "string",
+            "description": "Authentication failure reason",
+            "example": "Authentication required. Missing Bearer token.",
+        },
+        "data": {
+            "description": "Always null on failure",
+            "nullable": True,
+            "example": None,
+        },
+    },
+    "required": ["status", "message"],
+}
+
+_RAFT_FORBIDDEN_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Standard Raft Framework permission denied error envelope",
+    "properties": {
+        "status": {
+            "type": "boolean",
+            "description": "False on permission denial",
+            "example": False,
+        },
+        "message": {
+            "type": "string",
+            "description": "Permission denial reason",
+            "example": "Admin privilege required to perform this action.",
+        },
+        "data": {
+            "description": "Always null on failure",
+            "nullable": True,
+            "example": None,
+        },
+    },
+    "required": ["status", "message"],
+}
+
+_RAFT_NOT_FOUND_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Standard Raft Framework resource not found error envelope",
+    "properties": {
+        "status": {
+            "type": "boolean",
+            "description": "False on resource not found",
+            "example": False,
+        },
+        "message": {
+            "type": "string",
+            "description": "Resource not found description",
+            "example": "Resource not found.",
+        },
+        "data": {
+            "description": "Always null on failure",
+            "nullable": True,
+            "example": None,
+        },
+    },
+    "required": ["status", "message"],
+}
+
+_RAFT_VALIDATION_ERROR_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "description": "Standard Raft Framework validation error response envelope",
+    "properties": {
+        "status": {
+            "type": "boolean",
+            "description": "False on validation failure",
+            "example": False,
+        },
+        "message": {
+            "type": "string",
+            "description": "Validation error summary",
+            "example": "Validation Error",
+        },
+        "data": {
+            "description": "Always null on failure",
+            "nullable": True,
+            "example": None,
+        },
+        "errors": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "List of validation errors per field",
+            "example": [
+                "title: Blog title must be at least 3 characters long.",
+                "content: Blog content must be at least 10 characters long.",
+            ],
+        },
+    },
+    "required": ["status", "message", "errors"],
 }
 
 
@@ -118,7 +246,14 @@ def build_openapi_schema(
     """
     exclude = exclude_paths or set()
     paths: dict[str, Any] = {}
-    components_schemas: dict[str, Any] = {"Response": _RAFT_RESPONSE_SCHEMA}
+    components_schemas: dict[str, Any] = {
+        "Response": _RAFT_RESPONSE_SCHEMA,
+        "ErrorResponse": _RAFT_ERROR_RESPONSE_SCHEMA,
+        "UnauthorizedResponse": _RAFT_UNAUTHORIZED_RESPONSE_SCHEMA,
+        "ForbiddenResponse": _RAFT_FORBIDDEN_RESPONSE_SCHEMA,
+        "NotFoundResponse": _RAFT_NOT_FOUND_RESPONSE_SCHEMA,
+        "ValidationErrorResponse": _RAFT_VALIDATION_ERROR_RESPONSE_SCHEMA,
+    }
 
     for route in router.routes:
         if route.path in exclude:
@@ -253,35 +388,47 @@ def _build_responses(
     if route.responses:
         for status_code, value in route.responses.items():
             code_str = str(status_code)
+            is_error = code_str.startswith(("4", "5"))
 
             if isinstance(value, str):
-                # String → description + Response envelope reference
+                target_schema = "ErrorResponse" if is_error else "Response"
                 result[code_str] = {
                     "description": value,
                     "content": {
                         "application/json": {
-                            "schema": {"$ref": "#/components/schemas/Response"}
+                            "schema": {"$ref": f"#/components/schemas/{target_schema}"}
                         }
                     },
                 }
 
-            elif isinstance(value, type) and (
-                issubclass(value, BaseModel) or is_serializer_type(value)
-            ):
+            elif isinstance(value, type) and issubclass(value, BaseModel):
                 schema_name = value.__name__
-                if is_serializer_type(value):
-                    components_schemas[schema_name] = value.json_schema(write=False)
+                model_schema, defs = _pydantic_model_openapi_schema(value)
+                for k, v in defs.items():
+                    components_schemas[k] = v
+                components_schemas[schema_name] = model_schema
+
+                if not is_error:
+                    envelope_name = f"Response_{schema_name}"
+                    components_schemas[envelope_name] = {
+                        "type": "object",
+                        "description": f"Standard Raft Framework response envelope for {schema_name}",
+                        "properties": {
+                            "status": {"type": "boolean", "example": True},
+                            "message": {"type": "string", "example": "Success"},
+                            "data": {"$ref": f"#/components/schemas/{schema_name}"},
+                        },
+                        "required": ["status", "message", "data"],
+                    }
+                    ref_schema = envelope_name
                 else:
-                    model_schema, defs = _pydantic_model_openapi_schema(value)
-                    for k, v in defs.items():
-                        components_schemas[k] = v
-                    components_schemas[schema_name] = model_schema
+                    ref_schema = schema_name
 
                 result[code_str] = {
-                    "description": "Success",
+                    "description": "Success" if not is_error else "Error",
                     "content": {
                         "application/json": {
-                            "schema": {"$ref": f"#/components/schemas/{schema_name}"}
+                            "schema": {"$ref": f"#/components/schemas/{ref_schema}"}
                         }
                     },
                 }
@@ -299,18 +446,21 @@ def _build_responses(
             },
         }
 
-    # Standard error responses (only added if not explicitly defined)
-    for code, desc in [
-        ("400", "Bad Request"),
-        ("422", "Validation Error"),
-        ("500", "Internal Server Error"),
+    # Standard error responses with distinct schemas and realistic examples
+    for code, desc, schema_name in [
+        ("400", "Bad Request", "ErrorResponse"),
+        ("401", "Unauthorized", "UnauthorizedResponse"),
+        ("403", "Forbidden", "ForbiddenResponse"),
+        ("404", "Not Found", "NotFoundResponse"),
+        ("422", "Validation Error", "ValidationErrorResponse"),
+        ("500", "Internal Server Error", "ErrorResponse"),
     ]:
         if code not in result:
             result[code] = {
                 "description": desc,
                 "content": {
                     "application/json": {
-                        "schema": {"$ref": "#/components/schemas/Response"}
+                        "schema": {"$ref": f"#/components/schemas/{schema_name}"}
                     }
                 },
             }

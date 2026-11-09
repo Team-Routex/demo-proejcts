@@ -47,15 +47,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - backend_uploads:/app/projects/backend/uploads
+      - ./projects/backend/uploads:/app/projects/backend/uploads
     networks:
       - raft_network
 
 volumes:
   postgres_data:
     name: raft_blog_postgres_data
-  backend_uploads:
-    name: raft_blog_uploads
 
 networks:
   raft_network:

@@ -1,10 +1,12 @@
-"""Media Upload Views."""
+"""Media Upload Views using RaftSQL ORM File Storage."""
 
+import io
 import secrets
 from pathlib import Path
 from raft import Response
 from raft.core.exceptions import HTTPException, ValidationError
 from raft.core.request import RaftRequest
+from raftsql.storage import default_storage
 from middleware.auth import get_authenticated_user
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
@@ -12,7 +14,7 @@ MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 
 
 async def upload_file_view(request: RaftRequest) -> Response:
-    """Handle multipart file upload for featured images and avatars."""
+    """Handle multipart file upload using RaftSQL ORM default_storage."""
     get_authenticated_user(request, require=True)
 
     files = await request.files()
@@ -27,14 +29,11 @@ async def upload_file_view(request: RaftRequest) -> Response:
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, message=f"Invalid file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}")
 
-    # Generate collision-free sanitized name
+    # Delegate file management, saving, and URL resolution to RaftSQL default_storage
     safe_name = f"{secrets.token_hex(12)}{ext}"
-    upload_dir = Path(__file__).resolve().parent.parent / "uploads"
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    content = io.BytesIO(uploaded.content) if hasattr(uploaded, "content") else uploaded.file
+    saved_name = default_storage.save(safe_name, content)
+    file_url = default_storage.url(saved_name)
 
-    dest_path = upload_dir / safe_name
-    uploaded.save(str(dest_path))
-
-    file_url = f"/uploads/{safe_name}"
-    return Response.success(data={"url": file_url, "filename": safe_name, "size": uploaded.size})
+    return Response.success(data={"url": file_url, "filename": saved_name, "size": uploaded.size})
 
