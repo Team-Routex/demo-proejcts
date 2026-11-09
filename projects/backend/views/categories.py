@@ -7,6 +7,7 @@ from raft.core.request import RaftRequest
 from raftsql.orm.q import Q
 from models.blog import Category, BlogCategory, Blog
 from middleware.auth import get_authenticated_user
+from schemas import CategoryResponseSchema, BlogListItemSchema, dump
 
 
 def _slugify(text: str) -> str:
@@ -29,7 +30,7 @@ class CategoryListView(View):
         else:
             cats = await Category.objects.alist()
 
-        categories = []
+        results = []
         for c in cats:
             bcs = await BlogCategory.objects.filter(category_id=c.id).alist()
             blog_ids = [bc.blog_id for bc in bcs]
@@ -41,17 +42,19 @@ class CategoryListView(View):
                     approval_status="approved",
                 ).acount()
 
-            categories.append({
-                "id": c.id,
-                "name": c.name,
-                "slug": c.slug,
-                "description": c.description or "",
-                "blog_count": blog_count,
-                "created_at": c.created_at.isoformat() if hasattr(c.created_at, "isoformat") else str(c.created_at),
-            })
+            results.append(
+                CategoryResponseSchema(
+                    id=c.id,
+                    name=c.name,
+                    slug=c.slug,
+                    description=c.description or "",
+                    blog_count=blog_count,
+                    created_at=c.created_at,
+                )
+            )
 
-        categories.sort(key=lambda x: (-x["blog_count"], x["name"].lower()))
-        return Response.success(data=categories)
+        results.sort(key=lambda x: (-x.blog_count, x.name.lower()))
+        return Response.success(data=dump(results))
 
     async def post(self, request: RaftRequest) -> Response:
         claims = get_authenticated_user(request, require=True)
@@ -70,8 +73,16 @@ class CategoryListView(View):
 
         existing = await Category.objects.filter(slug=slug).afirst()
         if existing:
+            schema = CategoryResponseSchema(
+                id=existing.id,
+                name=existing.name,
+                slug=existing.slug,
+                description=existing.description or "",
+                blog_count=0,
+                created_at=existing.created_at,
+            )
             return Response.success(
-                data={"id": existing.id, "name": existing.name, "slug": existing.slug, "description": existing.description},
+                data=dump(schema),
                 message="Category already exists.",
             )
 
@@ -82,8 +93,17 @@ class CategoryListView(View):
             created_by_id=user_id,
         )
 
+        schema = CategoryResponseSchema(
+            id=cat.id,
+            name=cat.name,
+            slug=cat.slug,
+            description=cat.description or "",
+            blog_count=0,
+            created_at=cat.created_at,
+        )
+
         return Response.created(
-            data={"id": cat.id, "name": cat.name, "slug": cat.slug, "description": cat.description, "blog_count": 0},
+            data=dump(schema),
             message="Category created successfully.",
         )
 
@@ -100,7 +120,7 @@ class CategoryDetailView(View):
         bcs = await BlogCategory.objects.filter(category_id=cat.id).alist()
         blog_ids = [bc.blog_id for bc in bcs]
         blog_count = 0
-        blogs = []
+        recent = []
 
         if blog_ids:
             blog_count = await Blog.objects.filter(
@@ -115,23 +135,27 @@ class CategoryDetailView(View):
                 approval_status="approved",
             ).order_by("-created_at").limit(5).alist()
 
-            for b in recent:
-                blogs.append({
-                    "id": b.id,
-                    "title": b.title,
-                    "slug": b.slug,
-                    "summary": b.summary,
-                    "featured_image": b.featured_image,
-                    "views_count": int(b.views_count),
-                    "created_at": b.created_at.isoformat() if hasattr(b.created_at, "isoformat") else str(b.created_at),
-                })
+        serialized_blogs = []
+        for b in recent:
+            serialized_blogs.append({
+                "id": b.id,
+                "title": b.title,
+                "slug": b.slug,
+                "summary": b.summary or "",
+                "featured_image": b.featured_image or "",
+                "views_count": int(b.views_count or 0),
+                "created_at": b.created_at.isoformat() if hasattr(b.created_at, "isoformat") else str(b.created_at),
+            })
 
-        return Response.success(data={
-            "id": cat.id,
-            "name": cat.name,
-            "slug": cat.slug,
-            "description": cat.description or "",
-            "blog_count": blog_count,
-            "recent_blogs": blogs,
-        })
+        cat_schema = CategoryResponseSchema(
+            id=cat.id,
+            name=cat.name,
+            slug=cat.slug,
+            description=cat.description or "",
+            blog_count=blog_count,
+            created_at=cat.created_at,
+        )
+        data = dump(cat_schema)
+        data["recent_blogs"] = serialized_blogs
 
+        return Response.success(data=data)

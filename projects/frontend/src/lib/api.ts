@@ -2,7 +2,7 @@ import { ApiResponse, Blog, Category, Tag, Comment, Notification, PaginatedRespo
 
 export function getApiBase(): string {
   if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    return "";
   }
   return process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 }
@@ -75,27 +75,15 @@ async function request<T>(
 export const api = {
   // Upload
   async uploadFile(file: File): Promise<string> {
-    const token = getToken();
     const formData = new FormData();
     formData.append("file", file);
 
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const baseUrl = getApiBase();
-    const res = await fetch(`${baseUrl}/api/upload`, {
+    const res = await request<{ url: string }>("/api/upload", {
       method: "POST",
-      headers,
       body: formData,
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      throw new ApiError(data?.message || "File upload failed", res.status);
-    }
-    return data.data.url;
+    return res.url;
   },
 
   // Auth

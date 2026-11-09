@@ -18,6 +18,7 @@ router.get("/")(list_blogs_view)
 router.post("")(create_blog_view)
 router.post("/")(create_blog_view)
 router.get("/user/my")(list_user_blogs_view)
+router.get("/user/me")(list_user_blogs_view)
 router.get("/{slug}")(get_blog_view)
 router.put("/{id}")(update_blog_view)
 router.delete("/{id}")(delete_blog_view)
@@ -27,6 +28,7 @@ router.post("/{id}/submit")(submit_blog_view)
 routes = [
     route("/api/blogs", list_blogs_view, methods=["GET"]),
     route("/api/blogs/user/my", list_user_blogs_view, methods=["GET"]),
+    route("/api/blogs/user/me", list_user_blogs_view, methods=["GET"]),
     route("/api/blogs", create_blog_view, methods=["POST"]),
     route("/api/blogs/{slug}", get_blog_view, methods=["GET"]),
     route("/api/blogs/{id}", update_blog_view, methods=["PUT"]),

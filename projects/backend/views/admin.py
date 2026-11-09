@@ -12,6 +12,13 @@ from models.reaction import Reaction
 from models.analytics import PageView
 from middleware.auth import require_admin
 from models.notification import create_and_send_notification
+from schemas import (
+    AdminOverviewSchema,
+    AdminBlogListItemSchema,
+    AdminUserListItemSchema,
+    CategoryResponseSchema,
+    dump,
+)
 
 
 async def admin_overview_view(request: RaftRequest) -> Response:
@@ -29,7 +36,7 @@ async def admin_overview_view(request: RaftRequest) -> Response:
     pending_blogs = await Blog.objects.filter(approval_status="pending").acount()
     approved_blogs = await Blog.objects.filter(approval_status="approved").acount()
 
-    return Response.success(data={
+    overview_data = {
         "total_users": users_count,
         "total_blogs": blogs_count,
         "total_visits": views_count,
@@ -40,7 +47,8 @@ async def admin_overview_view(request: RaftRequest) -> Response:
             "pending_blogs": pending_blogs,
             "approved_blogs": approved_blogs,
         },
-    })
+    }
+    return Response.success(data=dump(AdminOverviewSchema(**overview_data)))
 
 
 async def admin_analytics_view(request: RaftRequest) -> Response:
@@ -265,8 +273,9 @@ async def admin_list_users_view(request: RaftRequest) -> Response:
             "registration_date": u.created_at.isoformat() if hasattr(u.created_at, "isoformat") else str(u.created_at),
         })
 
+    user_schemas = [AdminUserListItemSchema(**u) for u in users]
     return Response.success(data={
-        "items": users,
+        "items": dump(user_schemas),
         "total": total,
         "page": page,
         "limit": limit,
@@ -406,8 +415,9 @@ async def admin_list_blogs_view(request: RaftRequest) -> Response:
             "updated_at": b.updated_at.isoformat() if hasattr(b.updated_at, "isoformat") else str(b.updated_at),
         })
 
+    blog_schemas = [AdminBlogListItemSchema(**b) for b in blogs]
     return Response.success(data={
-        "items": blogs,
+        "items": dump(blog_schemas),
         "total": total,
         "page": page,
         "limit": limit,
@@ -429,7 +439,7 @@ async def admin_approve_blog_view(request: RaftRequest) -> Response:
     blog.rejection_reason = ""
     await blog.asave()
 
-    app = getattr(request, "_scope", {}).get("app")
+    app = getattr(request, "app", None) or getattr(request, "_scope", {}).get("app")
     await create_and_send_notification(
         app=app,
         user_id=blog.author_id,
@@ -454,13 +464,13 @@ async def admin_reject_blog_view(request: RaftRequest) -> Response:
         raise NotFound(message="Blog not found.")
 
     data = await request.json() or {}
-    reason = str(data.get("reason", "Content does not meet publication guidelines.")).strip()
+    reason = str(data.get("rejection_reason") or data.get("reason") or "Content does not meet publication guidelines.").strip()
 
     blog.approval_status = "rejected"
     blog.rejection_reason = reason
     await blog.asave()
 
-    app = getattr(request, "_scope", {}).get("app")
+    app = getattr(request, "app", None) or getattr(request, "_scope", {}).get("app")
     await create_and_send_notification(
         app=app,
         user_id=blog.author_id,
@@ -472,7 +482,7 @@ async def admin_reject_blog_view(request: RaftRequest) -> Response:
         target_slug=blog.slug,
     )
 
-    return Response.success(data={"id": blog.id, "approval_status": "rejected", "reason": reason}, message="Blog post rejected.")
+    return Response.success(data={"id": blog.id, "approval_status": "rejected", "rejection_reason": reason, "reason": reason}, message="Blog post rejected.")
 
 
 async def admin_moderate_blog_view(request: RaftRequest) -> Response:
@@ -588,7 +598,8 @@ async def admin_list_categories_view(request: RaftRequest) -> Response:
             "created_at": c.created_at.isoformat() if hasattr(c.created_at, "isoformat") else str(c.created_at),
         })
 
-    return Response.success(data=items)
+    serialized_cats = dump([CategoryResponseSchema(**c) for c in items])
+    return Response.success(data=serialized_cats)
 
 
 async def admin_update_category_view(request: RaftRequest) -> Response:

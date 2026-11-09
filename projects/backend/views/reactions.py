@@ -8,6 +8,7 @@ from models.blog import Blog
 from models.comment import Comment
 from middleware.auth import get_authenticated_user
 from models.notification import create_and_send_notification
+from schemas import ReactionResponseSchema, dump
 
 
 async def toggle_reaction_view(request: RaftRequest) -> Response:
@@ -78,8 +79,14 @@ async def toggle_reaction_view(request: RaftRequest) -> Response:
                     target_slug=blog_slug,
                 )
 
+    schema = ReactionResponseSchema(
+        target_type=target_type,
+        target_id=target_id,
+        liked=liked,
+        likes_count=new_count,
+    )
     return Response.success(
-        data={"target_type": target_type, "target_id": target_id, "liked": liked, "likes_count": new_count},
+        data=dump(schema),
         message="Liked." if liked else "Unliked.",
     )
 
@@ -116,4 +123,3 @@ async def get_reaction_status_view(request: RaftRequest) -> Response:
         }
 
     return Response.success(data=results)
-

@@ -612,7 +612,9 @@ class Raft:
         if scope["type"] != "http":
             return
 
+        scope["app"] = self
         request = RaftRequest(scope, receive)
+        request.app = self
 
         try:
             # Build the middleware chain once (lazy, cached).

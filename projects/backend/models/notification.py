@@ -45,7 +45,9 @@ class Notification(Model):
         target_slug: str = "",
     ):
         """Create a persistent notification in PostgreSQL and broadcast to user's WebSocket room."""
-        if user_id == sender_id:
+        # For social likes, skip notifying oneself.
+        # For editorial and review updates (blog_approved, blog_rejected), ALWAYS create and deliver notification.
+        if user_id == sender_id and notif_type in ("like_blog", "like_comment"):
             return None
 
         try:
@@ -65,6 +67,7 @@ class Notification(Model):
             if ws_manager:
                 payload = {
                     "event": "new_notification",
+                    "type": "notification",
                     "data": {
                         "id": notif.id,
                         "type": notif.type,

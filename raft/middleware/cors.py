@@ -33,14 +33,14 @@ async def cors_middleware(request: RaftRequest, call_next: CallNext) -> RawRespo
     # Preflight
     if request.method == "OPTIONS" and allowed:
         response = RawResponse(status_code=204)
-        _set_cors_headers(response, origin)
+        _set_cors_headers(response, origin, request)
         response.headers["Access-Control-Max-Age"] = "86400"
         return response
 
     response = await call_next(request)
 
     if allowed:
-        _set_cors_headers(response, origin)
+        _set_cors_headers(response, origin, request)
 
     return response
 
@@ -54,23 +54,34 @@ def _is_origin_allowed(origin: str) -> bool:
     return origin in settings.CORS_ALLOWED_ORIGINS
 
 
-def _set_cors_headers(response: RawResponse, origin: str) -> None:
+def _set_cors_headers(response: RawResponse, origin: str, request: RaftRequest | None = None) -> None:
     """Apply CORS headers to *response*."""
     if "*" in settings.CORS_ALLOWED_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = "*"
     else:
         response.headers["Access-Control-Allow-Origin"] = origin or "*"
-        existing_vary = response.headers.get("Vary")
-        if existing_vary:
-            vary_tokens = [v.strip().lower() for v in existing_vary.split(",")]
-            if "origin" not in vary_tokens:
-                response.headers["Vary"] = f"{existing_vary}, Origin"
-        else:
-            response.headers["Vary"] = "Origin"
+
+    existing_vary = response.headers.get("Vary")
+    if existing_vary:
+        vary_tokens = [v.strip().lower() for v in existing_vary.split(",")]
+        if "origin" not in vary_tokens:
+            response.headers["Vary"] = f"{existing_vary}, Origin"
+    else:
+        response.headers["Vary"] = "Origin"
 
     response.headers["Access-Control-Allow-Methods"] = ", ".join(
         settings.CORS_ALLOW_METHODS
     )
-    response.headers["Access-Control-Allow-Headers"] = ", ".join(
-        settings.CORS_ALLOW_HEADERS
-    )
+    
+    req_headers = ""
+    if request:
+        req_headers = request.get_header("access-control-request-headers", "")
+        if request.get_header("access-control-request-private-network") == "true":
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+
+    if req_headers:
+        response.headers["Access-Control-Allow-Headers"] = req_headers
+    else:
+        response.headers["Access-Control-Allow-Headers"] = ", ".join(
+            settings.CORS_ALLOW_HEADERS
+        )

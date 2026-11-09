@@ -6,6 +6,7 @@ from raft.core.request import RaftRequest
 from models.notification import Notification
 from models.user import User, UserProfile
 from middleware.auth import get_authenticated_user
+from schemas import NotificationResponseSchema, dump
 
 
 async def list_notifications_view(request: RaftRequest) -> Response:
@@ -26,25 +27,27 @@ async def list_notifications_view(request: RaftRequest) -> Response:
         sender = await User.objects.filter(id=n.sender_id).afirst() if n.sender_id else None
         profile = await UserProfile.objects.filter(user_id=n.sender_id).afirst() if n.sender_id else None
 
-        items.append({
-            "id": n.id,
-            "type": n.type,
-            "title": n.title,
-            "message": n.message,
-            "target_id": n.target_id,
-            "target_slug": n.target_slug,
-            "is_read": n.is_read,
-            "created_at": n.created_at.isoformat() if hasattr(n.created_at, "isoformat") else str(n.created_at),
-            "sender": {
-                "id": n.sender_id,
-                "username": sender.username if sender else "system",
-                "name": profile.full_name if profile and profile.full_name else (sender.username if sender else "System"),
-                "avatar": profile.avatar_url if profile and profile.avatar_url else "",
-            },
-        })
+        items.append(
+            NotificationResponseSchema(
+                id=n.id,
+                type=n.type,
+                title=n.title,
+                message=n.message,
+                target_id=n.target_id,
+                target_slug=n.target_slug,
+                is_read=n.is_read,
+                created_at=n.created_at,
+                sender={
+                    "id": n.sender_id,
+                    "username": sender.username if sender else "system",
+                    "name": profile.full_name if profile and profile.full_name else (sender.username if sender else "System"),
+                    "avatar": profile.avatar_url if profile and profile.avatar_url else "",
+                },
+            )
+        )
 
     return Response.success(data={
-        "items": items,
+        "items": dump(items),
         "total": total,
         "unread_count": unread_count,
         "page": page,
@@ -84,4 +87,3 @@ async def mark_all_read_view(request: RaftRequest) -> Response:
 
     await Notification.objects.filter(user_id=user_id, is_read=False).aupdate(is_read=True)
     return Response.success(message="All notifications marked as read.")
-

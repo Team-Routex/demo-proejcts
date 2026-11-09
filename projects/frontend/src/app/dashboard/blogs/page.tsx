@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
+  AlertCircle,
 } from "lucide-react";
 
 const columnHelper = createColumnHelper<Blog>();
@@ -75,10 +76,14 @@ export default function MyBlogsPage() {
               >
                 {info.getValue()}
               </Link>
-              {blog.rejection_reason && blog.approval_status === "rejected" && (
-                <p className="mt-0.5 text-xs text-rose-600 line-clamp-1">
-                  Reason: {blog.rejection_reason}
-                </p>
+              {blog.approval_status === "rejected" && (
+                <div className="mt-1 flex items-start gap-1 rounded bg-rose-50 border border-rose-200 px-2 py-1 text-xs text-rose-700">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-rose-500" />
+                  <div>
+                    <span className="font-bold">Rejection Reason: </span>
+                    <span>{blog.rejection_reason || "Content does not meet publication guidelines."}</span>
+                  </div>
+                </div>
               )}
             </div>
           );

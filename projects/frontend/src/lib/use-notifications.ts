@@ -57,7 +57,8 @@ export function useNotifications() {
       ws.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          if (payload.type === "notification" && payload.data) {
+          const isNotif = payload.type === "notification" || payload.event === "new_notification";
+          if (isNotif && payload.data) {
             const notif: Notification = payload.data;
             setLatestNotification(notif);
             setUnreadCount((prev) => prev + 1);

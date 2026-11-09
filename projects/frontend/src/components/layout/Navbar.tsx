@@ -16,6 +16,7 @@ import {
   LogOut,
   User,
   ChevronDown,
+  Shield,
 } from "lucide-react";
 
 export function Navbar() {
@@ -140,13 +141,23 @@ export function Navbar() {
                       </div>
 
                       <div className="py-1 text-xs">
+                        {isAdmin && (
+                          <Link
+                            href="/admin"
+                            onClick={() => setDropdownOpen(false)}
+                            className="flex items-center gap-2 px-4 py-2 font-bold text-[#f48840] hover:bg-orange-50/70 transition-colors"
+                          >
+                            <Shield className="h-3.5 w-3.5 text-[#f48840]" />
+                            <span>Admin Console</span>
+                          </Link>
+                        )}
                         <Link
                           href="/dashboard"
                           onClick={() => setDropdownOpen(false)}
                           className="flex items-center gap-2 px-4 py-2 text-[#7a7a7a] hover:bg-[#f7f7f7] hover:text-[#f48840]"
                         >
                           <LayoutDashboard className="h-3.5 w-3.5" />
-                          <span>User Dashboard</span>
+                          <span>Author Studio</span>
                         </Link>
                         <Link
                           href="/dashboard/profile"

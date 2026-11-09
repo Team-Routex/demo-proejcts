@@ -159,7 +159,18 @@ export default function NotificationsPage() {
                     </p>
                     <div className="flex items-center gap-3 pt-1 text-[11px] text-slate-400">
                       <span>{formatTimeAgo(n.created_at)}</span>
-                      {n.target_slug && (
+                      {n.type === "blog_rejected" && n.target_id ? (
+                        <>
+                          <span>•</span>
+                          <Link
+                            href={`/dashboard/blogs/${n.target_id}/edit`}
+                            className="inline-flex items-center gap-1 font-bold text-rose-600 hover:underline"
+                          >
+                            <span>Revise & Resubmit</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </Link>
+                        </>
+                      ) : n.target_slug ? (
                         <>
                           <span>•</span>
                           <Link
@@ -170,7 +181,7 @@ export default function NotificationsPage() {
                             <ExternalLink className="h-3 w-3" />
                           </Link>
                         </>
-                      )}
+                      ) : null}
                     </div>
                   </div>
                 </div>

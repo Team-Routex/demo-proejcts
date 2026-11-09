@@ -6,6 +6,7 @@ from raft.core.exceptions import ValidationError, NotFound
 from raft.core.request import RaftRequest
 from models.blog import Tag, BlogTag, Blog
 from middleware.auth import get_authenticated_user, require_admin
+from schemas import TagResponseSchema, dump
 
 
 def slugify(text: str) -> str:
@@ -20,18 +21,21 @@ class TagListView(View):
 
     async def get(self, request: RaftRequest) -> Response:
         tags = await Tag.objects.order_by("name").alist()
-        items = []
+        tag_schemas = []
         for t in tags:
             pivots = await BlogTag.objects.filter(tag_id=t.id).alist()
-            items.append({
-                "id": t.id,
-                "name": t.name,
-                "slug": t.slug,
-                "description": t.description,
-                "blog_count": len(pivots),
-                "created_at": t.created_at.isoformat() if t.created_at else None,
-            })
-        return Response.success(data=items)
+            tag_schemas.append(
+                TagResponseSchema(
+                    id=t.id,
+                    name=t.name,
+                    slug=t.slug,
+                    description=t.description or "",
+                    blog_count=len(pivots),
+                    created_at=t.created_at,
+                )
+            )
+
+        return Response.success(data=dump(tag_schemas))
 
     async def post(self, request: RaftRequest) -> Response:
         get_authenticated_user(request, require=True)
@@ -50,13 +54,17 @@ class TagListView(View):
             slug=slug,
             description=(body.get("description") or "").strip(),
         )
+
+        schema = TagResponseSchema(
+            id=tag.id,
+            name=tag.name,
+            slug=tag.slug,
+            description=tag.description or "",
+            blog_count=0,
+            created_at=tag.created_at,
+        )
         return Response.success(
-            data={
-                "id": tag.id,
-                "name": tag.name,
-                "slug": tag.slug,
-                "description": tag.description,
-            },
+            data=dump(schema),
             message="Tag created successfully",
             status_code=201,
         )
@@ -83,20 +91,24 @@ class TagSlugView(View):
                         "id": b.id,
                         "title": b.title,
                         "slug": b.slug,
-                        "summary": b.summary,
-                        "featured_image": b.featured_image,
-                        "views_count": b.views_count,
-                        "created_at": b.created_at.isoformat() if b.created_at else None,
+                        "summary": b.summary or "",
+                        "featured_image": b.featured_image or "",
+                        "views_count": int(b.views_count or 0),
+                        "created_at": b.created_at.isoformat() if hasattr(b.created_at, "isoformat") else str(b.created_at),
                     })
 
-        return Response.success(data={
-            "id": tag.id,
-            "name": tag.name,
-            "slug": tag.slug,
-            "description": tag.description,
-            "blog_count": len(blogs),
-            "blogs": blogs,
-        })
+        schema = TagResponseSchema(
+            id=tag.id,
+            name=tag.name,
+            slug=tag.slug,
+            description=tag.description or "",
+            blog_count=len(blogs),
+            created_at=tag.created_at,
+        )
+        data = dump(schema)
+        data["blogs"] = blogs
+
+        return Response.success(data=data)
 
 
 class TagDetailView(View):
@@ -118,13 +130,16 @@ class TagDetailView(View):
             tag.description = body["description"].strip()
 
         await tag.asave()
+        schema = TagResponseSchema(
+            id=tag.id,
+            name=tag.name,
+            slug=tag.slug,
+            description=tag.description or "",
+            blog_count=0,
+            created_at=tag.created_at,
+        )
         return Response.success(
-            data={
-                "id": tag.id,
-                "name": tag.name,
-                "slug": tag.slug,
-                "description": tag.description,
-            },
+            data=dump(schema),
             message="Tag updated successfully",
         )
 
@@ -138,4 +153,3 @@ class TagDetailView(View):
         await BlogTag.objects.filter(tag_id=tag_id).adelete()
         await Tag.objects.filter(id=tag_id).adelete()
         return Response.success(message="Tag deleted successfully")
-

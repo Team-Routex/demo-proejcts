@@ -12,6 +12,14 @@ from middleware.auth import (
     create_token_for_user,
     get_authenticated_user,
 )
+from schemas import (
+    RegisterSchema,
+    LoginSchema,
+    ProfileUpdateSchema,
+    UserResponseSchema,
+    UserProfileResponseSchema,
+    dump,
+)
 
 
 def _validate_email(email: str) -> bool:
@@ -64,20 +72,24 @@ async def register_view(request: RaftRequest) -> Response:
 
     token = create_token_for_user(user)
 
-    user_data = {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "role": user.role,
-        "is_verified": user.is_verified,
-        "full_name": profile.full_name,
-        "avatar_url": profile.avatar_url,
-        "bio": profile.bio,
-        "website": profile.website,
-        "created_at": user.created_at.isoformat() if hasattr(user.created_at, "isoformat") else str(user.created_at),
-    }
+    user_schema = UserResponseSchema(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        role=user.role,
+        is_verified=user.is_verified,
+        is_active=user.is_active,
+        full_name=profile.full_name,
+        avatar_url=profile.avatar_url,
+        bio=profile.bio,
+        website=profile.website,
+        created_at=user.created_at,
+    )
 
-    return Response.created(data={"user": user_data, "token": token, "token_type": "bearer"}, message="Registration successful.")
+    return Response.created(
+        data={"user": dump(user_schema), "token": token, "token_type": "bearer"},
+        message="Registration successful.",
+    )
 
 
 async def login_view(request: RaftRequest) -> Response:
@@ -104,19 +116,24 @@ async def login_view(request: RaftRequest) -> Response:
     profile = await UserProfile.objects.filter(user_id=user.id).afirst()
     token = create_token_for_user(user)
 
-    user_data = {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "role": user.role,
-        "is_verified": user.is_verified,
-        "full_name": profile.full_name if profile else user.username,
-        "avatar_url": profile.avatar_url if profile else "",
-        "bio": profile.bio if profile else "",
-        "website": profile.website if profile else "",
-    }
+    user_schema = UserResponseSchema(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        role=user.role,
+        is_verified=user.is_verified,
+        is_active=user.is_active,
+        full_name=profile.full_name if profile else user.username,
+        avatar_url=profile.avatar_url if profile else "",
+        bio=profile.bio if profile else "",
+        website=profile.website if profile else "",
+        created_at=user.created_at,
+    )
 
-    return Response.success(data={"user": user_data, "token": token, "token_type": "bearer"}, message="Login successful.")
+    return Response.success(
+        data={"user": dump(user_schema), "token": token, "token_type": "bearer"},
+        message="Login successful.",
+    )
 
 
 async def me_view(request: RaftRequest) -> Response:
@@ -136,27 +153,30 @@ async def me_view(request: RaftRequest) -> Response:
     rejected_blogs = await Blog.objects.filter(author_id=user.id, approval_status="rejected").acount()
     draft_blogs = await Blog.objects.filter(author_id=user.id, publication_status="draft").acount()
 
-    user_data = {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "role": user.role,
-        "is_verified": user.is_verified,
-        "full_name": profile.full_name if profile else user.username,
-        "avatar_url": profile.avatar_url if profile else "",
-        "bio": profile.bio if profile else "",
-        "website": profile.website if profile else "",
-        "stats": {
-            "total_blogs": total_blogs,
-            "approved_blogs": approved_blogs,
-            "pending_blogs": pending_blogs,
-            "rejected_blogs": rejected_blogs,
-            "draft_blogs": draft_blogs,
-        },
-        "created_at": user.created_at.isoformat() if hasattr(user.created_at, "isoformat") else str(user.created_at),
+    stats = {
+        "total_blogs": total_blogs,
+        "approved_blogs": approved_blogs,
+        "pending_blogs": pending_blogs,
+        "rejected_blogs": rejected_blogs,
+        "draft_blogs": draft_blogs,
     }
 
-    return Response.success(data={"user": user_data, "stats": user_data.get("stats", {})})
+    user_schema = UserResponseSchema(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        role=user.role,
+        is_verified=user.is_verified,
+        is_active=user.is_active,
+        full_name=profile.full_name if profile else user.username,
+        avatar_url=profile.avatar_url if profile else "",
+        bio=profile.bio if profile else "",
+        website=profile.website if profile else "",
+        stats=stats,
+        created_at=user.created_at,
+    )
+
+    return Response.success(data={"user": dump(user_schema), "stats": stats})
 
 
 async def update_profile_view(request: RaftRequest) -> Response:
@@ -180,13 +200,19 @@ async def update_profile_view(request: RaftRequest) -> Response:
 
     await profile.asave()
 
+    profile_schema = UserProfileResponseSchema(
+        full_name=profile.full_name or "",
+        bio=profile.bio or "",
+        avatar_url=profile.avatar_url or "",
+        website=profile.website or "",
+        location=getattr(profile, "location", "") or "",
+        twitter_handle=getattr(profile, "twitter_handle", "") or "",
+        github_handle=getattr(profile, "github_handle", "") or "",
+        created_at=profile.created_at,
+    )
+
     return Response.success(
-        data={
-            "full_name": profile.full_name,
-            "bio": profile.bio,
-            "avatar_url": profile.avatar_url,
-            "website": profile.website,
-        },
+        data=dump(profile_schema),
         message="Profile updated successfully.",
     )
 
@@ -194,4 +220,3 @@ async def update_profile_view(request: RaftRequest) -> Response:
 async def logout_view(request: RaftRequest) -> Response:
     """Terminate the client session."""
     return Response.success(message="Logged out successfully.")
-

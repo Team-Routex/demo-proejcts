@@ -133,6 +133,36 @@ export function BlogEditor({ initialBlog, isEditing = false }: BlogEditorProps) 
         </div>
       )}
 
+      {initialBlog?.approval_status === "rejected" && (
+        <div className="flex items-start gap-3 rounded-lg bg-rose-50 border border-rose-200 p-4 text-sm text-rose-800">
+          <AlertCircle className="h-5 w-5 shrink-0 text-rose-600 mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="font-bold">Editorial Review: Revision Requested</h4>
+            <p className="text-xs text-rose-700">
+              <strong>Rejection Reason:</strong>{" "}
+              {initialBlog.rejection_reason || "Content does not meet publication guidelines."}
+            </p>
+            <p className="text-[11px] text-rose-600">
+              Please revise your content and click &quot;Submit for Approval&quot; to resubmit for editorial review.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {initialBlog?.approval_status === "pending" && (
+        <div className="flex items-center gap-3 rounded-lg bg-amber-50 border border-amber-200 p-4 text-xs text-amber-800">
+          <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+          <span>This article is currently <strong>in review</strong> by platform administrators.</span>
+        </div>
+      )}
+
+      {initialBlog?.approval_status === "approved" && (
+        <div className="flex items-center gap-3 rounded-lg bg-emerald-50 border border-emerald-200 p-4 text-xs text-emerald-800">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+          <span>This article has been <strong>approved</strong> and is live on the public blog.</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Main writing column */}
         <div className="lg:col-span-8 space-y-6">

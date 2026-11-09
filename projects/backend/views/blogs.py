@@ -14,6 +14,14 @@ from models.analytics import PageView
 from models.reaction import Reaction
 from models.comment import Comment
 from middleware.auth import get_authenticated_user
+from schemas import (
+    BlogListItemSchema,
+    BlogDetailSchema,
+    AuthorCompactSchema,
+    CategoryResponseSchema,
+    TagResponseSchema,
+    dump,
+)
 
 
 def _parse_scheduled_at(val: Any) -> Optional[datetime]:
@@ -67,24 +75,26 @@ async def list_blogs_view(request: RaftRequest) -> Response:
         qs = qs.filter(id__in=blog_ids)
 
     if tag_slug:
-        t_obj = await Tag.objects.filter(slug=tag_slug).afirst()
-        if not t_obj:
+        tag = await Tag.objects.filter(slug=tag_slug).afirst()
+        if not tag:
             return Response.success(data={"items": [], "total": 0, "page": page, "limit": limit, "total_pages": 0})
-        bts = await BlogTag.objects.filter(tag_id=t_obj.id).alist()
-        blog_ids_tag = [bt.blog_id for bt in bts]
-        if not blog_ids_tag:
+        bts = await BlogTag.objects.filter(tag_id=tag.id).alist()
+        blog_ids = [bt.blog_id for bt in bts]
+        if not blog_ids:
             return Response.success(data={"items": [], "total": 0, "page": page, "limit": limit, "total_pages": 0})
-        qs = qs.filter(id__in=blog_ids_tag)
+        qs = qs.filter(id__in=blog_ids)
 
     if search:
-        qs = qs.filter(Q(title__icontains=search) | Q(summary__icontains=search) | Q(content__icontains=search))
+        qs = qs.filter(
+            Q(title__icontains=search) | Q(summary__icontains=search) | Q(content__icontains=search)
+        )
 
     total = await qs.acount()
 
-    if sort_by == "oldest":
+    if sort_by == "popular":
+        qs = qs.order_by("-views_count", "-created_at")
+    elif sort_by == "oldest":
         qs = qs.order_by("created_at")
-    elif sort_by == "views":
-        qs = qs.order_by("-views_count")
     else:
         qs = qs.order_by("-created_at")
 
@@ -100,37 +110,59 @@ async def list_blogs_view(request: RaftRequest) -> Response:
         bcs = await BlogCategory.objects.filter(blog_id=b.id).alist()
         cat_ids = [bc.category_id for bc in bcs]
         cats = [await Category.objects.filter(id=cid).afirst() for cid in cat_ids] if cat_ids else []
-        categories = [{"id": c.id, "name": c.name, "slug": c.slug} for c in cats if c]
+        categories = [
+            CategoryResponseSchema(
+                id=c.id,
+                name=c.name,
+                slug=c.slug,
+                description=c.description or "",
+            )
+            for c in cats if c
+        ]
 
         bts = await BlogTag.objects.filter(blog_id=b.id).alist()
         tag_ids = [bt.tag_id for bt in bts]
         tag_objs = [await Tag.objects.filter(id=tid).afirst() for tid in tag_ids] if tag_ids else []
-        tags = [{"id": t.id, "name": t.name, "slug": t.slug} for t in tag_objs if t]
+        tags = [
+            TagResponseSchema(
+                id=t.id,
+                name=t.name,
+                slug=t.slug,
+                description=t.description or "",
+            )
+            for t in tag_objs if t
+        ]
 
-        items.append({
-            "id": b.id,
-            "title": b.title,
-            "slug": b.slug,
-            "summary": b.summary,
-            "featured_image": b.featured_image,
-            "views_count": int(b.views_count),
-            "likes_count": likes_count,
-            "comments_count": comments_count,
-            "publication_status": b.publication_status,
-            "approval_status": b.approval_status,
-            "created_at": b.created_at.isoformat() if hasattr(b.created_at, "isoformat") else str(b.created_at),
-            "author": {
-                "id": author.id if author else None,
-                "username": author.username if author else "",
-                "name": profile.full_name if profile and profile.full_name else (author.username if author else "Author"),
-                "avatar": profile.avatar_url if profile and profile.avatar_url else "",
-            },
-            "categories": categories,
-            "tags": tags,
-        })
+        author_schema = AuthorCompactSchema(
+            id=author.id if author else None,
+            username=author.username if author else "",
+            name=profile.full_name if profile and profile.full_name else (author.username if author else "Author"),
+            avatar=profile.avatar_url if profile and profile.avatar_url else "",
+        )
+
+        item = BlogListItemSchema(
+            id=b.id,
+            title=b.title,
+            slug=b.slug,
+            summary=b.summary or "",
+            featured_image=b.featured_image or "",
+            views_count=int(b.views_count or 0),
+            likes_count=likes_count,
+            comments_count=comments_count,
+            publication_status=b.publication_status,
+            approval_status=b.approval_status,
+            rejection_reason=b.rejection_reason or "",
+            scheduled_at=b.scheduled_at,
+            created_at=b.created_at,
+            updated_at=b.updated_at,
+            author=author_schema,
+            categories=categories,
+            tags=tags,
+        )
+        items.append(item)
 
     return Response.success(data={
-        "items": items,
+        "items": dump(items),
         "total": total,
         "page": page,
         "limit": limit,
@@ -175,42 +207,65 @@ async def get_blog_view(request: RaftRequest) -> Response:
     bcs = await BlogCategory.objects.filter(blog_id=blog.id).alist()
     cat_ids = [bc.category_id for bc in bcs]
     cats = [await Category.objects.filter(id=cid).afirst() for cid in cat_ids] if cat_ids else []
-    categories = [{"id": c.id, "name": c.name, "slug": c.slug, "description": c.description} for c in cats if c]
+    categories = [
+        CategoryResponseSchema(
+            id=c.id,
+            name=c.name,
+            slug=c.slug,
+            description=c.description or "",
+        )
+        for c in cats if c
+    ]
 
     bts = await BlogTag.objects.filter(blog_id=blog.id).alist()
     tag_ids = [bt.tag_id for bt in bts]
     tag_objs = [await Tag.objects.filter(id=tid).afirst() for tid in tag_ids] if tag_ids else []
-    tags = [{"id": t.id, "name": t.name, "slug": t.slug, "description": t.description} for t in tag_objs if t]
+    tags = [
+        TagResponseSchema(
+            id=t.id,
+            name=t.name,
+            slug=t.slug,
+            description=t.description or "",
+        )
+        for t in tag_objs if t
+    ]
 
-    return Response.success(data={
-        "id": blog.id,
-        "title": blog.title,
-        "slug": blog.slug,
-        "content": blog.content,
-        "summary": blog.summary,
-        "featured_image": blog.featured_image,
-        "views_count": int(blog.views_count),
-        "likes_count": likes_count,
-        "comments_count": comments_count,
-        "publication_status": blog.publication_status,
-        "approval_status": blog.approval_status,
-        "rejection_reason": blog.rejection_reason or "",
-        "scheduled_at": blog.scheduled_at.isoformat() if getattr(blog, "scheduled_at", None) else None,
-        "created_at": blog.created_at.isoformat() if hasattr(blog.created_at, "isoformat") else str(blog.created_at),
-        "updated_at": blog.updated_at.isoformat() if hasattr(blog.updated_at, "isoformat") else str(blog.updated_at),
-        "has_liked": user_has_liked,
-        "author": {
-            "id": author.id if author else None,
-            "username": author.username if author else "",
-            "full_name": profile.full_name if profile and profile.full_name else (author.username if author else "Author"),
-            "avatar_url": profile.avatar_url if profile and profile.avatar_url else "",
-            "bio": profile.bio if profile else "",
-            "website": profile.website if profile else "",
-            "is_verified": author.is_verified if author else False,
-        },
-        "categories": categories,
-        "tags": tags,
-    })
+    author_schema = AuthorCompactSchema(
+        id=author.id if author else None,
+        username=author.username if author else "",
+        name=profile.full_name if profile and profile.full_name else (author.username if author else "Author"),
+        avatar=profile.avatar_url if profile and profile.avatar_url else "",
+    )
+
+    detail_schema = BlogDetailSchema(
+        id=blog.id,
+        title=blog.title,
+        slug=blog.slug,
+        content=blog.content,
+        summary=blog.summary or "",
+        featured_image=blog.featured_image or "",
+        views_count=int(blog.views_count or 0),
+        likes_count=likes_count,
+        comments_count=comments_count,
+        publication_status=blog.publication_status,
+        approval_status=blog.approval_status,
+        rejection_reason=blog.rejection_reason or "",
+        scheduled_at=blog.scheduled_at,
+        created_at=blog.created_at,
+        updated_at=blog.updated_at,
+        has_liked=user_has_liked,
+        is_liked=user_has_liked,
+        is_bookmarked=False,
+        author=author_schema,
+        categories=categories,
+        tags=tags,
+    )
+
+    data = dump(detail_schema)
+    if profile:
+        data["author"]["bio"] = profile.bio or ""
+        data["author"]["website"] = profile.website or ""
+    return Response.success(data=data)
 
 
 async def create_blog_view(request: RaftRequest) -> Response:
@@ -225,7 +280,14 @@ async def create_blog_view(request: RaftRequest) -> Response:
     featured_image = str(data.get("featured_image", "")).strip()
     category_ids = data.get("category_ids", [])
     tag_ids = data.get("tag_ids", [])
-    publication_status = str(data.get("publication_status", "draft")).strip().lower()
+    action = str(data.get("action", "")).strip().lower()
+    if action == "submit":
+        publication_status = "published"
+    elif action == "draft":
+        publication_status = "draft"
+    else:
+        publication_status = str(data.get("publication_status", "draft")).strip().lower()
+
     raw_scheduled = data.get("scheduled_at")
     scheduled_at = _parse_scheduled_at(raw_scheduled)
 
@@ -244,54 +306,74 @@ async def create_blog_view(request: RaftRequest) -> Response:
         slug = f"{base_slug}-{counter}"
         counter += 1
 
-    now = datetime.now()
-    if scheduled_at and scheduled_at > now:
-        publication_status = "scheduled"
-        approval_status = "pending"
+    if not summary:
+        plain = re.sub(r"<[^>]+>", " ", content)
+        summary = plain.strip()[:200]
+
+    # New submissions go to pending for review (even if created by an admin), unless explicitly overridden by an admin
+    if "approval_status" in data and claims.get("role") == "admin":
+        approval_status = str(data["approval_status"]).strip().lower()
     else:
-        approval_status = "pending" if publication_status == "published" else "draft"
+        approval_status = "pending"
 
     blog = await Blog.objects.acreate(
+        author_id=author_id,
         title=title,
         slug=slug,
         content=content,
-        summary=summary or content[:160].strip() + "...",
+        summary=summary,
         featured_image=featured_image,
-        author_id=author_id,
         publication_status=publication_status,
         approval_status=approval_status,
+        rejection_reason="",
         scheduled_at=scheduled_at,
         views_count=0,
     )
 
-    if category_ids and isinstance(category_ids, list):
-        for cat_id in category_ids:
+    if category_ids:
+        for cid in category_ids:
             try:
-                cid = int(cat_id)
+                cid = int(cid)
                 if await Category.objects.filter(id=cid).aexists():
                     await BlogCategory.objects.acreate(blog_id=blog.id, category_id=cid)
             except Exception:
                 pass
 
-    if tag_ids and isinstance(tag_ids, list):
-        for tag_id in tag_ids:
+    if tag_ids:
+        for tid in tag_ids:
             try:
-                tid = int(tag_id)
+                tid = int(tid)
                 if await Tag.objects.filter(id=tid).aexists():
                     await BlogTag.objects.acreate(blog_id=blog.id, tag_id=tid)
             except Exception:
                 pass
 
+    item = BlogListItemSchema(
+        id=blog.id,
+        title=blog.title,
+        slug=blog.slug,
+        summary=blog.summary or "",
+        featured_image=blog.featured_image or "",
+        views_count=0,
+        likes_count=0,
+        comments_count=0,
+        publication_status=blog.publication_status,
+        approval_status=blog.approval_status,
+        rejection_reason=blog.rejection_reason or "",
+        scheduled_at=blog.scheduled_at,
+        created_at=blog.created_at,
+        updated_at=blog.updated_at,
+    )
     return Response.created(
-        data={"id": blog.id, "slug": blog.slug, "title": blog.title, "publication_status": blog.publication_status, "approval_status": blog.approval_status},
-        message="Blog created successfully." + (" Submitted for admin approval." if publication_status == "published" else " Saved as draft."),
+        data=dump(item),
+        message="Blog post created successfully.",
     )
 
 
 async def update_blog_view(request: RaftRequest) -> Response:
     """Update an existing blog post using RaftSQLORM."""
     claims = get_authenticated_user(request, require=True)
-    user_id = claims["user_id"]
+    author_id = claims["user_id"]
     is_admin = claims.get("role") == "admin"
 
     blog_id = int(request.path_params.get("id", 0))
@@ -299,55 +381,62 @@ async def update_blog_view(request: RaftRequest) -> Response:
     if not blog:
         raise NotFound(message="Blog post not found.")
 
-    if blog.author_id != user_id and not is_admin:
+    if blog.author_id != author_id and not is_admin:
         raise Forbidden(message="You do not have permission to edit this blog post.")
 
     data = await request.json() or {}
-    if "title" in data:
-        title = str(data["title"]).strip()
+    title = data.get("title")
+    content = data.get("content")
+    summary = data.get("summary")
+    featured_image = data.get("featured_image")
+    publication_status = data.get("publication_status")
+    category_ids = data.get("category_ids")
+    tag_ids = data.get("tag_ids")
+    raw_scheduled = data.get("scheduled_at")
+
+    if title is not None:
+        title = str(title).strip()
         if len(title) >= 3:
             blog.title = title
-    if "content" in data:
-        content = str(data["content"]).strip()
-        if len(content) >= 10:
-            blog.content = content
-    if "summary" in data:
-        blog.summary = str(data["summary"]).strip()
-    if "featured_image" in data:
-        blog.featured_image = str(data["featured_image"]).strip()
-    if "scheduled_at" in data:
-        raw_scheduled = data["scheduled_at"]
-        blog.scheduled_at = _parse_scheduled_at(raw_scheduled)
-    if "publication_status" in data:
-        pub = str(data["publication_status"]).strip().lower()
-        if pub in ("draft", "published", "scheduled"):
-            now = datetime.now()
-            if blog.scheduled_at and blog.scheduled_at > now:
-                blog.publication_status = "scheduled"
-                if blog.approval_status != "approved":
-                    blog.approval_status = "pending"
-            else:
-                blog.publication_status = pub
-                if pub == "published" and blog.approval_status != "approved":
-                    blog.approval_status = "pending"
+    if content is not None:
+        blog.content = str(content).strip()
+    if summary is not None:
+        blog.summary = str(summary).strip()
+    if featured_image is not None:
+        blog.featured_image = str(featured_image).strip()
+    action = str(data.get("action", "")).strip().lower()
+    if action == "submit":
+        blog.publication_status = "published"
+        blog.approval_status = "pending"
+        blog.rejection_reason = ""
+    elif action == "draft":
+        blog.publication_status = "draft"
+    elif publication_status is not None:
+        val = str(publication_status).strip().lower()
+        if val in ("draft", "published", "scheduled"):
+            blog.publication_status = val
 
+    if raw_scheduled is not None:
+        blog.scheduled_at = _parse_scheduled_at(raw_scheduled)
+
+    blog.updated_at = datetime.now()
     await blog.asave()
 
-    if "category_ids" in data and isinstance(data["category_ids"], list):
+    if category_ids is not None:
         await BlogCategory.objects.filter(blog_id=blog.id).adelete()
-        for cat_id in data["category_ids"]:
+        for cid in category_ids:
             try:
-                cid = int(cat_id)
+                cid = int(cid)
                 if await Category.objects.filter(id=cid).aexists():
                     await BlogCategory.objects.acreate(blog_id=blog.id, category_id=cid)
             except Exception:
                 pass
 
-    if "tag_ids" in data and isinstance(data["tag_ids"], list):
+    if tag_ids is not None:
         await BlogTag.objects.filter(blog_id=blog.id).adelete()
-        for tag_id in data["tag_ids"]:
+        for tid in tag_ids:
             try:
-                tid = int(tag_id)
+                tid = int(tid)
                 if await Tag.objects.filter(id=tid).aexists():
                     await BlogTag.objects.acreate(blog_id=blog.id, tag_id=tid)
             except Exception:
@@ -429,37 +518,53 @@ async def list_user_blogs_view(request: RaftRequest) -> Response:
         bcs = await BlogCategory.objects.filter(blog_id=b.id).alist()
         cat_ids = [bc.category_id for bc in bcs]
         cats = [await Category.objects.filter(id=cid).afirst() for cid in cat_ids] if cat_ids else []
-        categories = [{"id": c.id, "name": c.name, "slug": c.slug} for c in cats if c]
+        categories = [
+            CategoryResponseSchema(
+                id=c.id,
+                name=c.name,
+                slug=c.slug,
+                description=c.description or "",
+            )
+            for c in cats if c
+        ]
 
         bts = await BlogTag.objects.filter(blog_id=b.id).alist()
         tag_ids = [bt.tag_id for bt in bts]
         tag_objs = [await Tag.objects.filter(id=tid).afirst() for tid in tag_ids] if tag_ids else []
-        tags = [{"id": t.id, "name": t.name, "slug": t.slug} for t in tag_objs if t]
+        tags = [
+            TagResponseSchema(
+                id=t.id,
+                name=t.name,
+                slug=t.slug,
+                description=t.description or "",
+            )
+            for t in tag_objs if t
+        ]
 
-        items.append({
-            "id": b.id,
-            "title": b.title,
-            "slug": b.slug,
-            "summary": b.summary,
-            "featured_image": b.featured_image,
-            "views_count": int(b.views_count),
-            "likes_count": likes_count,
-            "comments_count": comments_count,
-            "publication_status": b.publication_status,
-            "approval_status": b.approval_status,
-            "rejection_reason": b.rejection_reason or "",
-            "scheduled_at": b.scheduled_at.isoformat() if getattr(b, "scheduled_at", None) else None,
-            "created_at": b.created_at.isoformat() if hasattr(b.created_at, "isoformat") else str(b.created_at),
-            "updated_at": b.updated_at.isoformat() if hasattr(b.updated_at, "isoformat") else str(b.updated_at),
-            "categories": categories,
-            "tags": tags,
-        })
+        item = BlogListItemSchema(
+            id=b.id,
+            title=b.title,
+            slug=b.slug,
+            summary=b.summary or "",
+            featured_image=b.featured_image or "",
+            views_count=int(b.views_count or 0),
+            likes_count=likes_count,
+            comments_count=comments_count,
+            publication_status=b.publication_status,
+            approval_status=b.approval_status,
+            rejection_reason=b.rejection_reason or "",
+            scheduled_at=b.scheduled_at,
+            created_at=b.created_at,
+            updated_at=b.updated_at,
+            categories=categories,
+            tags=tags,
+        )
+        items.append(item)
 
     return Response.success(data={
-        "items": items,
+        "items": dump(items),
         "total": total,
         "page": page,
         "limit": limit,
         "total_pages": (total + limit - 1) // limit if limit > 0 else 1,
     })
-

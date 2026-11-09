@@ -9,6 +9,7 @@ from models.user import User, UserProfile
 from models.reaction import Reaction
 from middleware.auth import get_authenticated_user
 from models.notification import create_and_send_notification
+from schemas import CommentResponseSchema, dump
 
 
 async def list_blog_comments_view(request: RaftRequest) -> Response:
@@ -18,7 +19,7 @@ async def list_blog_comments_view(request: RaftRequest) -> Response:
     claims = get_authenticated_user(request, require=False)
     current_user_id = claims.get("user_id") if claims else None
 
-    comments = await Comment.objects.filter(blog_id=blog_id, is_approved=True).order_by("created_at").alist()
+    comments = await Comment.objects.filter(blog_id=blog_id).order_by("created_at").alist()
 
     comments_by_id = {}
     root_comments = []
@@ -41,10 +42,11 @@ async def list_blog_comments_view(request: RaftRequest) -> Response:
             "blog_id": c.blog_id,
             "parent_id": c.parent_id,
             "content": c.content,
+            "is_approved": c.is_approved,
             "likes_count": likes_count,
             "user_has_liked": user_has_liked,
-            "created_at": c.created_at.isoformat() if hasattr(c.created_at, "isoformat") else str(c.created_at),
-            "updated_at": c.updated_at.isoformat() if hasattr(c.updated_at, "isoformat") else str(c.updated_at),
+            "created_at": c.created_at,
+            "updated_at": c.updated_at,
             "author": {
                 "id": c.user_id,
                 "username": user.username if user else "anonymous",
@@ -63,8 +65,9 @@ async def list_blog_comments_view(request: RaftRequest) -> Response:
         else:
             root_comments.append(c_obj)
 
-    root_comments.sort(key=lambda x: x["created_at"], reverse=True)
-    return Response.success(data=root_comments)
+    root_comments.sort(key=lambda x: str(x["created_at"]), reverse=True)
+    schemas = [CommentResponseSchema.model_validate(rc) for rc in root_comments]
+    return Response.success(data=dump(schemas))
 
 
 async def create_comment_view(request: RaftRequest) -> Response:
@@ -83,115 +86,130 @@ async def create_comment_view(request: RaftRequest) -> Response:
     parent_id = data.get("parent_id")
 
     if not content:
-        raise ValidationError(message="Comment content cannot be empty.")
+        raise ValidationError(message="Comment text cannot be empty.")
 
-    parent_comment = None
     if parent_id is not None:
-        parent_id = int(parent_id)
-        parent_comment = await Comment.objects.filter(id=parent_id, blog_id=blog_id).afirst()
-        if not parent_comment:
-            raise NotFound(message="Parent comment not found.")
+        try:
+            parent_id = int(parent_id)
+            parent = await Comment.objects.filter(id=parent_id, blog_id=blog_id).afirst()
+            if not parent:
+                raise ValidationError(message="Parent comment does not exist.")
+        except (ValueError, TypeError):
+            parent_id = None
 
     comment = await Comment.objects.acreate(
         blog_id=blog_id,
         user_id=user_id,
-        parent_id=parent_id,
         content=content,
+        parent_id=parent_id,
         is_approved=True,
     )
 
+    user = await User.objects.filter(id=user_id).afirst()
+    profile = await UserProfile.objects.filter(user_id=user_id).afirst()
     app = getattr(request, "_scope", {}).get("app")
 
-    if parent_comment:
-        if parent_comment.user_id != user_id:
+    if parent_id:
+        parent_comment = await Comment.objects.filter(id=parent_id).afirst()
+        if parent_comment and parent_comment.user_id != user_id:
             await create_and_send_notification(
                 app=app,
                 user_id=parent_comment.user_id,
                 sender_id=user_id,
-                notif_type="reply",
-                title=f"New reply from @{sender_username}",
-                message=f"{sender_username} replied to your comment on '{blog.title}': \"{content[:80]}\"",
+                notif_type="reply_comment",
+                title=f"@{sender_username} replied to your comment",
+                message=f"{sender_username} replied: '{content[:80]}...'",
                 target_id=blog.id,
                 target_slug=blog.slug,
             )
-    else:
-        if blog.author_id != user_id:
-            await create_and_send_notification(
-                app=app,
-                user_id=blog.author_id,
-                sender_id=user_id,
-                notif_type="comment",
-                title=f"New comment on '{blog.title}'",
-                message=f"{sender_username} commented: \"{content[:80]}\"",
-                target_id=blog.id,
-                target_slug=blog.slug,
-            )
+    elif blog.author_id != user_id:
+        await create_and_send_notification(
+            app=app,
+            user_id=blog.author_id,
+            sender_id=user_id,
+            notif_type="new_comment",
+            title=f"@{sender_username} commented on your blog",
+            message=f"{sender_username} commented on '{blog.title}'",
+            target_id=blog.id,
+            target_slug=blog.slug,
+        )
 
-    profile = await UserProfile.objects.filter(user_id=user_id).afirst()
-
-    return Response.created(
-        data={
-            "id": comment.id,
-            "blog_id": comment.blog_id,
-            "parent_id": comment.parent_id,
-            "content": comment.content,
-            "likes_count": 0,
-            "user_has_liked": False,
-            "created_at": comment.created_at.isoformat() if hasattr(comment.created_at, "isoformat") else str(comment.created_at),
-            "author": {
-                "id": user_id,
-                "username": claims["username"],
-                "name": profile.full_name if profile and profile.full_name else claims["username"],
-                "avatar": profile.avatar_url if profile and profile.avatar_url else "",
-            },
-            "replies": [],
+    comment_dict = {
+        "id": comment.id,
+        "blog_id": comment.blog_id,
+        "parent_id": comment.parent_id,
+        "content": comment.content,
+        "is_approved": comment.is_approved,
+        "likes_count": 0,
+        "user_has_liked": False,
+        "created_at": comment.created_at,
+        "updated_at": comment.updated_at,
+        "author": {
+            "id": user_id,
+            "username": user.username if user else "user",
+            "name": profile.full_name if profile and profile.full_name else (user.username if user else "User"),
+            "avatar": profile.avatar_url if profile and profile.avatar_url else "",
+            "is_verified": user.is_verified if user else False,
         },
-        message="Comment posted successfully.",
-    )
+        "replies": [],
+    }
 
-
-async def update_comment_view(request: RaftRequest) -> Response:
-    """Update a comment using RaftSQLORM."""
-    claims = get_authenticated_user(request, require=True)
-    user_id = claims["user_id"]
-    is_admin = claims.get("role") == "admin"
-
-    comment_id = int(request.path_params.get("id", 0))
-    comment = await Comment.objects.filter(id=comment_id).afirst()
-    if not comment:
-        raise NotFound(message="Comment not found.")
-
-    if comment.user_id != user_id and not is_admin:
-        raise Forbidden(message="You do not have permission to edit this comment.")
-
-    data = await request.json() or {}
-    content = str(data.get("content", "")).strip()
-    if not content:
-        raise ValidationError(message="Comment content cannot be empty.")
-
-    comment.content = content
-    await comment.asave()
-
-    return Response.success(data={"id": comment.id, "content": comment.content}, message="Comment updated successfully.")
+    schema = CommentResponseSchema.model_validate(comment_dict)
+    return Response.created(data=dump(schema), message="Comment submitted.")
 
 
 async def delete_comment_view(request: RaftRequest) -> Response:
-    """Delete a comment using RaftSQLORM."""
+    """Delete a comment (author or admin only) using RaftSQLORM."""
     claims = get_authenticated_user(request, require=True)
     user_id = claims["user_id"]
-    is_admin = claims.get("role") == "admin"
+    role = claims.get("role", "user")
 
     comment_id = int(request.path_params.get("id", 0))
     comment = await Comment.objects.filter(id=comment_id).afirst()
     if not comment:
         raise NotFound(message="Comment not found.")
 
-    if comment.user_id != user_id and not is_admin:
+    if comment.user_id != user_id and role != "admin":
         raise Forbidden(message="You do not have permission to delete this comment.")
 
     await Reaction.objects.filter(target_type="comment", target_id=comment.id).adelete()
     await Comment.objects.filter(parent_id=comment.id).adelete()
     await comment.adelete()
 
-    return Response.success(message="Comment deleted successfully.")
+    return Response.success(message="Comment deleted.")
 
+
+async def update_comment_view(request: RaftRequest) -> Response:
+    """Update a comment (author or admin only) using RaftSQLORM."""
+    claims = get_authenticated_user(request, require=True)
+    user_id = claims["user_id"]
+    role = claims.get("role", "user")
+
+    comment_id = int(request.path_params.get("id", 0))
+    comment = await Comment.objects.filter(id=comment_id).afirst()
+    if not comment:
+        raise NotFound(message="Comment not found.")
+
+    if comment.user_id != user_id and role != "admin":
+        raise Forbidden(message="You do not have permission to edit this comment.")
+
+    data = await request.json() or {}
+    content = str(data.get("content", "")).strip()
+    if not content:
+        raise ValidationError(message="Comment text cannot be empty.")
+
+    comment.content = content
+    await comment.asave()
+
+    schema = CommentResponseSchema.model_validate({
+        "id": comment.id,
+        "blog_id": comment.blog_id,
+        "parent_id": comment.parent_id,
+        "content": comment.content,
+        "is_approved": comment.is_approved,
+        "likes_count": 0,
+        "user_has_liked": False,
+        "created_at": comment.created_at,
+        "updated_at": comment.updated_at,
+    })
+    return Response.success(data=dump(schema), message="Comment updated.")

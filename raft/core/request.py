@@ -76,6 +76,7 @@ class RaftRequest:
         self._form: dict[str, Any] | None = None
         self._files: dict[str, UploadedFile] | None = None
         self.path_params: dict[str, str] = scope.get("path_params", {})
+        self.app: Any = scope.get("app")
         self.state: dict[str, Any] = {}  # Middleware / view scratch space.
         self.session: dict[str, Any] = {}  # Populated by session middleware.
         self.user: Any = None  # Populated by JWT auth / authentication classes.
