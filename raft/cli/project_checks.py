@@ -146,9 +146,13 @@ def _pytest_suite(root: Path) -> tuple[str, bool, str]:
             "N/A (pytest not installed — pip install pytest)",
         )
 
+    pytest_cmd = [sys.executable, "-m", "pytest", "-q", "--tb=line"]
+    if (root / "tests").is_dir() and not (root / "pytest.ini").is_file():
+        pytest_cmd.append("tests")
+
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "--tb=line"],
+            pytest_cmd,
             cwd=str(root),
             capture_output=True,
             text=True,

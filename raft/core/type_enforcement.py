@@ -31,6 +31,7 @@ always injected directly with no coercion.
 from __future__ import annotations
 
 import inspect
+import types
 import uuid
 from datetime import datetime, date, time
 from typing import Any, Union, get_args, get_origin, get_type_hints
@@ -288,9 +289,10 @@ def _is_pydantic_model(annotation: Any) -> bool:
 
 
 def _unwrap_optional(annotation: Any) -> Any | None:
-    """If annotation is Optional[X] (Union[X, None]), return X. Else None."""
+    """If annotation is Optional[X] (Union[X, None] or X | None), return X. Else None."""
     origin = get_origin(annotation)
-    if origin is Union:
+    is_union = origin is Union or (hasattr(types, "UnionType") and origin is types.UnionType)
+    if is_union:
         args = [a for a in get_args(annotation) if a is not type(None)]
         if len(args) == 1:
             return args[0]

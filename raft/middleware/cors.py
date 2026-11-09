@@ -56,8 +56,18 @@ def _is_origin_allowed(origin: str) -> bool:
 
 def _set_cors_headers(response: RawResponse, origin: str) -> None:
     """Apply CORS headers to *response*."""
-    allow_origin = origin if origin else "*"
-    response.headers["Access-Control-Allow-Origin"] = allow_origin
+    if "*" in settings.CORS_ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    else:
+        response.headers["Access-Control-Allow-Origin"] = origin or "*"
+        existing_vary = response.headers.get("Vary")
+        if existing_vary:
+            vary_tokens = [v.strip().lower() for v in existing_vary.split(",")]
+            if "origin" not in vary_tokens:
+                response.headers["Vary"] = f"{existing_vary}, Origin"
+        else:
+            response.headers["Vary"] = "Origin"
+
     response.headers["Access-Control-Allow-Methods"] = ", ".join(
         settings.CORS_ALLOW_METHODS
     )

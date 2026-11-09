@@ -31,6 +31,7 @@ Example::
 from __future__ import annotations
 
 import enum
+import functools
 import inspect
 import threading
 import time
@@ -176,18 +177,16 @@ class CircuitBreaker:
         """Decorator: ``@breaker`` / ``@breaker_instance`` for sync or async functions."""
         if inspect.iscoroutinefunction(func):
 
+            @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 return await self.acall(func, *args, **kwargs)
 
-            async_wrapper.__name__ = getattr(func, "__name__", "wrapped")
-            async_wrapper.__qualname__ = getattr(func, "__qualname__", "wrapped")
             return async_wrapper
 
+        @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             return self.call(func, *args, **kwargs)
 
-        sync_wrapper.__name__ = getattr(func, "__name__", "wrapped")
-        sync_wrapper.__qualname__ = getattr(func, "__qualname__", "wrapped")
         return sync_wrapper
 
     # ---- State machine ----------------------------------------------------

@@ -36,3 +36,14 @@ todo_project/__pycache__/
 todo_project/
 
 RaftSQL/
+raftsql/
+
+# Ignored projects and tooling
+.gsd/
+.gemini/
+.agents/
+.agent/
+myraft/
+scripts/
+GSD-STYLE.md
+DEPLOYMENT.md

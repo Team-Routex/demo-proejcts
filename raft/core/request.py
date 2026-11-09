@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 from http.cookies import SimpleCookie
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -247,7 +248,8 @@ def _parse_multipart(
 
     def on_file(file: Any) -> None:
         name = file.field_name.decode("utf-8", errors="replace")
-        filename = (file.file_name or b"upload").decode("utf-8", errors="replace")
+        raw_filename = (file.file_name or b"upload").decode("utf-8", errors="replace")
+        filename = Path(raw_filename.replace("\\", "/")).name or "upload"
         file.file_object.seek(0)
         body = file.file_object.read()
         ct = "application/octet-stream"

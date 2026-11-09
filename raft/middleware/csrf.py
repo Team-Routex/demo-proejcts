@@ -24,6 +24,7 @@ import hmac
 import secrets
 from urllib.parse import urlparse
 
+from raft.config.settings import settings
 from raft.core.exceptions import Forbidden
 from raft.core.request import RaftRequest
 from raft.core.response import RawResponse
@@ -60,7 +61,7 @@ async def csrf_middleware(request: RaftRequest, call_next: CallNext) -> RawRespo
         path="/",
         httponly=False,
         samesite="Lax",
-        secure=False,
+        secure=bool(settings.SESSION_COOKIE_SECURE),
     )
     return response
 
