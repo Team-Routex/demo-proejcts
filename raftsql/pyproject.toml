@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "raftsql"
+version = "1.1.0"
+description = "Minimal ORM from scratch, PostgreSQL only, sync + async"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv>=1.2.2",
+]
+
+[project.optional-dependencies]
+async = ["asyncpg"]
+sync = ["psycopg2"]
+all = ["asyncpg", "psycopg2"]
+
+[project.scripts]
+raftsql = "raftsql.cli:main"
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["raftsql", "raftsql.*"]
